@@ -124,27 +124,30 @@ int mtaReapplytr104Conf(void)
             fclose(fptr);
 	    return ANSC_STATUS_FAILURE;
         }
-        size_t bytesRead = fread(buffer, 1, length, fptr);
-        if ( bytesRead != (size_t) length ){
-            if ( bytesRead < (size_t) length){
-                CcspTraceDebug((" The complete file is not read \n"));
-            }
-            if (ferror(fptr)) {
-                CcspTraceDebug((" Error in reading the file  \n"));
-            }
-            fclose(fptr);
-            free(buffer);
-            return ANSC_STATUS_FAILURE;
-        }
-  
-        buffer[bytesRead] = '\0';
-	CcspTraceDebug(("buffer=%s\n", buffer));
-       
-        CcspTraceInfo(("%s:Calling CosaDmlTR104DataSet \n", __func__));
-        CosaDmlTR104DataSet(buffer, 1);
+
+	if (buffer) {
+		size_t bytesRead = fread(buffer, 1, length, fptr);
+		if ( bytesRead != (size_t) length ){
+			if ( bytesRead < (size_t) length){
+				CcspTraceDebug((" The complete file is not read \n"));
+			}
+			if (ferror(fptr)) {
+				CcspTraceDebug((" Error in reading the file  \n"));
+			}
+			fclose(fptr);
+			free(buffer);
+			return ANSC_STATUS_FAILURE;
+		}
+
+		buffer[bytesRead] = '\0';
+		CcspTraceDebug(("buffer=%s\n", buffer));
+
+		CcspTraceInfo(("%s:Calling CosaDmlTR104DataSet \n", __func__));
+		CosaDmlTR104DataSet(buffer, 1);
+		free(buffer);
+	}
        
         CcspTraceDebug(("%s Exiting \n",__FUNCTION__));
-	free(buffer);
 	fclose(fptr);
 	return ANSC_STATUS_SUCCESS;
   
