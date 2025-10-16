@@ -142,6 +142,15 @@ int mtaReapplytr104Conf(void)
 		buffer[bytesRead] = '\0';
 		CcspTraceDebug(("buffer=%s\n", buffer));
 
+        /* Coverity fix CID : 513281 Insecure data handling */
+        if (strnlen(buffer, length + 1) == 0) 
+        {
+            CcspTraceDebug(("Buffer is empty or invalid\n"));
+            free(buffer);
+            fclose(fptr);
+            return ANSC_STATUS_FAILURE;
+        }
+
 		CcspTraceInfo(("%s:Calling CosaDmlTR104DataSet \n", __func__));
 		CosaDmlTR104DataSet(buffer, 1);
 		free(buffer);
@@ -314,6 +323,14 @@ CosaDmlMTAGetServiceFlow
         }
         AnscCopyMemory(*ppCfg, pInfo, sizeof(MTAMGMT_MTA_SERVICE_FLOW)*(*pulCount));
         free(pInfo);
+    }
+    else
+    {
+        /* Coverity Fix CID : 58790, RESOURCE_LEAK */
+        if(pInfo != NULL)
+        {
+            free(pInfo);
+        }
     }
     return ANSC_STATUS_SUCCESS;
 
@@ -615,6 +632,14 @@ CosaDmlMTAGetDSXLogs
 		free(pInfo);
 	}
     }
+    else
+    {
+        /* Coverity Fix CID : 76397, RESOURCE_LEAK */
+        if( pInfo != NULL )
+        {
+            free(pInfo);
+        }
+    }
     return ANSC_STATUS_SUCCESS;
 
     /*
@@ -911,6 +936,14 @@ CosaDmlMtaGetMtaLog
             }
         }
         free(pInfo);
+    }
+    else
+    {
+        /* Coverity Fix CID : 79698 RESOURCE_LEAK */
+        if(pInfo != NULL)
+        {     
+            free(pInfo);
+        }
     }
     return ANSC_STATUS_SUCCESS;
 
@@ -1256,7 +1289,8 @@ void * MtaProvisioningStatusGetFunc(void * arg)
 		}
         }
         
-        pthread_exit(NULL);
+        /* Coverity Fix CID : 560416 Structurally dead code */
+        //pthread_exit(NULL);
   
 #endif /* _CBR_PRODUCT_REQ_ || _XB6_PRODUCT_REQ_*/
         CcspTraceInfo(("%s Exiting \n",__FUNCTION__));
@@ -1601,6 +1635,11 @@ ANSC_STATUS UpdateJsonParamLegacy
 						 CcspTraceWarning(( "Failed to update value for %s partner\n",PartnerId));
 						 CcspTraceWarning(( "Param:%s\n",pKey));
 			 			 cJSON_Delete(json);
+                         /* Coverity Fix CID : 65542 Resource leak */
+                         if (data)
+                         {
+			                 free(data);
+                         }
 						 return ANSC_STATUS_FAILURE;						
 				 	}
 				 }
@@ -1608,6 +1647,11 @@ ANSC_STATUS UpdateJsonParamLegacy
 			 	{
 			 		CcspTraceWarning(("%s - OBJECT  Value is NULL %s\n", pKey,__FUNCTION__ ));
 			 		cJSON_Delete(json);
+                    /* Coverity Fix CID : 65542 Resource leak */
+                    if (data)
+                    {
+                        free(data);
+                    }
 			 		return ANSC_STATUS_FAILURE;
 			 	}
 			 
@@ -1616,6 +1660,11 @@ ANSC_STATUS UpdateJsonParamLegacy
 			 {
 			 	CcspTraceWarning(("%s - PARTNER ID OBJECT Value is NULL\n", __FUNCTION__ ));
 			 	cJSON_Delete(json);
+                /* Coverity Fix CID : 65542 Resource leak */
+                if (data)
+                {
+                    free(data);
+                }
 			 	return ANSC_STATUS_FAILURE;
 			 }
 			cJSON_Delete(json);
@@ -1624,8 +1673,18 @@ ANSC_STATUS UpdateJsonParamLegacy
 	  else
 	  {
 		CcspTraceWarning(("PARTNERS_INFO_FILE %s is empty\n", PARTNERS_INFO_FILE));
+        /* Coverity Fix CID : 65542 Resource leak */
+        if (data)
+        {
+            free(data);
+        }
 		return ANSC_STATUS_FAILURE;
 	  }
+      /* Coverity Fix CID : 65542 Resource leak */
+      if (data)
+      {
+          free(data);
+      }
 	 return ANSC_STATUS_SUCCESS;
 }
 
@@ -1765,11 +1824,20 @@ ANSC_STATUS UpdateJsonParam
           else
           {
                 CcspTraceWarning(("BOOTSTRAP_INFO_FILE %s is empty\n", BOOTSTRAP_INFO_FILE));
+                /* Coverity Fix CID : 72622 Resource leak */
+                if (data)
+                {
+                    free(data);
+                }
                 return ANSC_STATUS_FAILURE;
           }
 
           //Also update in the legacy file /nvram/partners_defaults.json for firmware roll over purposes.
           UpdateJsonParamLegacy(pKey, PartnerId, pValue);
-
+          /* Coverity Fix CID : 72622 Resource leak */
+          if (data)
+          {
+              free(data);
+          }
          return ANSC_STATUS_SUCCESS;
 }

@@ -561,8 +561,16 @@ pErr TR104_Process_Webconfig_Request(void *Data)
                 buffer = (char*)malloc(length+1);
                 if (buffer)
                 {
-                    fread (buffer, 1, length+1, fptr_dummy);
-                    fputs(buffer,fptr);
+                    /* Coverity Fix CID : 190019 Ignoring number of bytes read */
+                    size_t bytesRead = fread (buffer, 1, length+1, fptr_dummy); 
+                    if (bytesRead == (size_t)(length + 1)) 
+                    {
+                        fputs(buffer,fptr);
+                    } 
+                    else 
+                    {
+                        CcspTraceError(("%s: fread incomplete.\n", __FUNCTION__));
+                    }
                 }
                 CcspTraceDebug(("%s:base64 has been copied to original file with length=%u\n",__FUNCTION__,length));
                 fclose(fptr_dummy);
@@ -1230,6 +1238,8 @@ int CosaDmlTR104DataSet(char* pString,int bootup)
             if(pWebConfig->voiceserviceTable == NULL)
             {
                 pWebConfig->voiceservice_count = 0;
+                /* Coverity Fix CID : 564371 Resource Leak */
+                msgpack_unpacked_destroy( &msg );
                 AnscFreeMemory(webConf);
                 free(pWebConfig);
                 return RETURN_ERR;
