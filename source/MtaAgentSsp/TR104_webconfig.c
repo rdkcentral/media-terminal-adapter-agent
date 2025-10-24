@@ -4,6 +4,7 @@
 #include "sysevent/sysevent.h"
 #include "webconfig_framework.h"
 #include <msgpack.h>
+#include <inttypes.h>
 
 
 char mta_provision_status[2][20] = {"MTA_PROVISIONED", "MTA_NON_PROVISIONED"};
@@ -1218,11 +1219,7 @@ int CosaDmlTR104DataSet(char* pString,int bootup)
         else if (strncmp(map_ptr->key.via.str.ptr, "version", map_ptr->key.via.str.size) == 0) {
             if (map_ptr->val.type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
                 pWebConfig->version = (uint64_t) map_ptr->val.via.u64;
-#ifdef _64BIT_ARCH_SUPPORT_
-                CcspTraceInfo(("Version type %d version %lu\n",map_ptr->val.type,pWebConfig->version));
-#else
-                CcspTraceInfo(("Version type %d version %llu\n",map_ptr->val.type,pWebConfig->version));
-#endif
+                CcspTraceInfo(("Version type %d version %" PRIu64 "\n",map_ptr->val.type,pWebConfig->version));
             }
         }
         else if (strncmp(map_ptr->key.via.str.ptr, "transaction_id", map_ptr->key.via.str.size) == 0) {
