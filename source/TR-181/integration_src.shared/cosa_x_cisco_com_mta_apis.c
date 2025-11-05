@@ -142,7 +142,7 @@ int mtaReapplytr104Conf(void)
 		buffer[bytesRead] = '\0';
 		CcspTraceDebug(("buffer=%s\n", buffer));
 
-        /* Coverity fix CID : 513281 Insecure data handling */
+        /* Coverity Fix CID : 513281 Insecure data handling */
         if (strnlen(buffer, length + 1) == 0) 
         {
             CcspTraceDebug(("Buffer is empty or invalid\n"));
