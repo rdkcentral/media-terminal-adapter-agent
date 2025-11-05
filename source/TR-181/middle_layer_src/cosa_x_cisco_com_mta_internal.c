@@ -419,7 +419,7 @@ CosaMTAInitializeEthWanProvDhcpOption
                                 if(rc != EOK)
                                 {
                                     ERR_CHK(rc);
-									/* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                    /* Coverity Fix CID : 120995 RESOURCE_LEAK */
                                     if (pMtaProv)
                                     {
                                        free(pMtaProv);
@@ -478,14 +478,14 @@ CosaMTAInitializeEthWanProvDhcpOption
                                 if(rc != EOK)
                                 {
                                     ERR_CHK(rc);
-									/* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                    /* Coverity Fix CID : 120995 RESOURCE_LEAK */
                                     if (pMtaProv)
                                     {
                                        free(pMtaProv);
                                     }
                                     return ANSC_STATUS_FAILURE;
                                 }
-								/* Coverity  fix CID : 340667 Unused Value */
+                                /* Coverity  fix CID : 340667 Unused Value */
                                 //x =0;
                                 //y =0;
 			}
