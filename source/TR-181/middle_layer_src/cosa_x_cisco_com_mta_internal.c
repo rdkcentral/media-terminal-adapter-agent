@@ -365,7 +365,7 @@ CosaMTAInitializeEthWanProvDhcpOption
                                if(rc != EOK)
                                {
                                    ERR_CHK(rc);
-								   /* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                   /* Coverity Fix CID : 120995 RESOURCE_LEAK */
                                    if (pMtaProv)
                                    {
                                        free(pMtaProv);
