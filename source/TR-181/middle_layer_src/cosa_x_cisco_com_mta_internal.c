@@ -1002,10 +1002,8 @@ else
 	}  
 
 /* CID 92066 Structurally dead code fix */
-#ifndef ENABLE_ETH_WAN
 free(pMtaProv);
 return ANSC_STATUS_SUCCESS;
-#endif
 }
 
 ANSC_STATUS

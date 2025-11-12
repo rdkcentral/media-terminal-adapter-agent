@@ -143,7 +143,7 @@ int mtaReapplytr104Conf(void)
 		CcspTraceDebug(("buffer=%s\n", buffer));
 
         /* Coverity fix CID : 513281 Insecure data handling */
-        if (strnlen(buffer, length + 1) == 0) 
+        if (buffer[0] == '\0')
         {
             CcspTraceDebug(("Buffer is empty or invalid\n"));
             free(buffer);
@@ -1668,6 +1668,11 @@ ANSC_STATUS UpdateJsonParamLegacy
 			 	return ANSC_STATUS_FAILURE;
 			 }
 			cJSON_Delete(json);
+            /* Coverity Fix CID : 65542 Resource leak */
+            if (data)
+            {
+               free(data);
+            }
 		 }
 	  }
 	  else
@@ -1680,11 +1685,6 @@ ANSC_STATUS UpdateJsonParamLegacy
         }
 		return ANSC_STATUS_FAILURE;
 	  }
-      /* Coverity Fix CID : 65542 Resource leak */
-      if (data)
-      {
-          free(data);
-      }
 	 return ANSC_STATUS_SUCCESS;
 }
 
