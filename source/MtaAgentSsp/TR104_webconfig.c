@@ -570,7 +570,7 @@ pErr TR104_Process_Webconfig_Request(void *Data)
                     } 
                     else 
                     {
-                        CcspTraceError(("%s: fread incomplete.\n", __FUNCTION__));
+                        CcspTraceError(("%s: fread incomplete. Expected %d bytes, got %zu bytes.\n", __FUNCTION__, length + 1, bytesRead));
                     }
                 }
                 CcspTraceDebug(("%s:base64 has been copied to original file with length=%u\n",__FUNCTION__,length));
