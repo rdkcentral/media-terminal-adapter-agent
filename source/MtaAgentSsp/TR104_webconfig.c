@@ -563,9 +563,10 @@ pErr TR104_Process_Webconfig_Request(void *Data)
                 if (buffer)
                 {
                     /* Coverity Fix CID : 190019 Ignoring number of bytes read */
-                    size_t bytesRead = fread (buffer, 1, length+1, fptr_dummy); 
-                    if (bytesRead == (size_t)(length + 1)) 
+                    size_t bytesRead = fread (buffer, 1, length, fptr_dummy); 
+                    if (bytesRead == (size_t)length) 
                     {
+                        buffer[length] = '\0'; // Ensure string is null-terminated
                         fputs(buffer,fptr);
                     } 
                     else 
