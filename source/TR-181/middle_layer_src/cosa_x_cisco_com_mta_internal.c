@@ -313,6 +313,11 @@ CosaMTAInitializeEthWanProvDhcpOption
                                 if(rc != EOK)
                                 {
                                     ERR_CHK(rc);
+                                    /* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                    if (pMtaProv)
+                                    {
+                                        free(pMtaProv);
+                                    }
                                     return ANSC_STATUS_FAILURE;
                                 }
 			}
@@ -360,6 +365,11 @@ CosaMTAInitializeEthWanProvDhcpOption
                                if(rc != EOK)
                                {
                                    ERR_CHK(rc);
+                                   /* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                   if (pMtaProv)
+                                   {
+                                       free(pMtaProv);
+                                   }
                                    return ANSC_STATUS_FAILURE;
                                }
                         x=0;
@@ -409,6 +419,11 @@ CosaMTAInitializeEthWanProvDhcpOption
                                 if(rc != EOK)
                                 {
                                     ERR_CHK(rc);
+                                    /* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                    if (pMtaProv)
+                                    {
+                                       free(pMtaProv);
+                                    }
                                     return ANSC_STATUS_FAILURE;
                                 }
                                 x=0;
@@ -463,10 +478,16 @@ CosaMTAInitializeEthWanProvDhcpOption
                                 if(rc != EOK)
                                 {
                                     ERR_CHK(rc);
+                                    /* Coverity Fix CID : 120995 RESOURCE_LEAK */
+                                    if (pMtaProv)
+                                    {
+                                       free(pMtaProv);
+                                    }
                                     return ANSC_STATUS_FAILURE;
                                 }
-                                x =0;
-                                y =0;
+                                /* Coverity  fix CID : 340667 Unused Value */
+                                //x =0;
+                                //y =0;
 			}
 			else
 			{
