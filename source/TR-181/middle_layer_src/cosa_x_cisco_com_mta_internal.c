@@ -77,6 +77,7 @@
 #include "mta_hal.h"
 #include <sysevent/sysevent.h>
 #include "syscfg/syscfg.h"
+#include "voice_dhcp_hal.h"
 
 #define MAX_BUFF_SIZE 128
 #define MAX_IP_PREF_VAL 6
@@ -174,6 +175,172 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
 			}
 	return ANSC_STATUS_SUCCESS;
 
+}
+
+// Helper to append TLV
+static int appendTlv(uint8_t *pBuf, int iOffset, uint8_t ui8Type, uint8_t ui8Len, const void *pVal)
+{
+    pBuf[iOffset++] = ui8Type;
+    pBuf[iOffset++] = ui8Len;
+    memcpy(&pBuf[iOffset], pVal, ui8Len);
+    return iOffset + ui8Len;
+}
+
+// Example IANA Enterprise Number (replace with your vendor if known)
+#define VENDOR_ENTERPRISE_NUM 3561
+
+int packDhcpOption125(const VoicePktcCapabilitiesType *pVoicePktCap, uint8_t *pOutbuf) {
+    int iOffset = 0;
+
+    // Pack IANA Enterprise Number (4 bytes, big-endian)
+    uint32_t vendorId = htonl(VENDOR_ENTERPRISE_NUM);
+    memcpy(&pOutbuf[iOffset], &vendorId, 4);
+    iOffset += 4;
+
+    // Pack TLVs (suboptions) - similar to Option 43
+    iOffset = appendTlv(pOutbuf, iOffset, 1, 1, &pVoicePktCap->pktcblVersion);
+    iOffset = appendTlv(pOutbuf, iOffset, 2, 1, &pVoicePktCap->numEndpoints);
+    iOffset = appendTlv(pOutbuf, iOffset, 3, 1, &pVoicePktCap->tgtSupport);
+    iOffset = appendTlv(pOutbuf, iOffset, 4, 1, &pVoicePktCap->httpDownload);
+    iOffset = appendTlv(pOutbuf, iOffset, 9, 1, &pVoicePktCap->nvramInfoStorage);
+    iOffset = appendTlv(pOutbuf, iOffset, 11, 3, pVoicePktCap->supportedCodecs);
+    iOffset = appendTlv(pOutbuf, iOffset, 12, 1, &pVoicePktCap->silenceSuppression);
+    iOffset = appendTlv(pOutbuf, iOffset, 13, 1, &pVoicePktCap->echoCancellation);
+    iOffset = appendTlv(pOutbuf, iOffset, 15, 1, &pVoicePktCap->ugsAd);
+    iOffset = appendTlv(pOutbuf, iOffset, 16, 1, &pVoicePktCap->ifIndexStart);
+    uint16_t ui16ProvFlow = htons(pVoicePktCap->supportedProvFlow);
+    iOffset = appendTlv(pOutbuf, iOffset, 18, 2, &ui16ProvFlow);
+    iOffset = appendTlv(pOutbuf, iOffset, 19, 1, &pVoicePktCap->t38Version);
+    iOffset = appendTlv(pOutbuf, iOffset, 20, 1, &pVoicePktCap->t38ErrorCorrection);
+    iOffset = appendTlv(pOutbuf, iOffset, 21, 1, &pVoicePktCap->rfc2833);
+    iOffset = appendTlv(pOutbuf, iOffset, 22, 1, &pVoicePktCap->voiceMetrics);
+    iOffset = appendTlv(pOutbuf, iOffset, 23, 3, pVoicePktCap->supportedMibs);
+    iOffset = appendTlv(pOutbuf, iOffset, 24, 1, &pVoicePktCap->multiGrants);
+    iOffset = appendTlv(pOutbuf, iOffset, 25, 1, &pVoicePktCap->v_152);
+    iOffset = appendTlv(pOutbuf, iOffset, 26, 1, &pVoicePktCap->certBootstrapping);
+    iOffset = appendTlv(pOutbuf, iOffset, 38, 1, &pVoicePktCap->ipAddrProvCap);
+
+    // Optionally, add an end marker if your client expects it (not required by RFC)
+    // pOutbuf[iOffset++] = 0xFF;
+
+    return iOffset;
+}
+
+// Option 43: simple TLV packing (example: ASCII or direct TLV)
+int packDhcpOption43(const VoicePktcCapabilitiesType *pVoicePktCap, uint8_t *pOutbuf) {
+    int iOffset = 0;
+    iOffset = appendTlv(pOutbuf, iOffset, 1, 1, &pVoicePktCap->pktcblVersion);
+    iOffset = appendTlv(pOutbuf, iOffset, 2, 1, &pVoicePktCap->numEndpoints);
+    iOffset = appendTlv(pOutbuf, iOffset, 3, 1, &pVoicePktCap->tgtSupport);
+    iOffset = appendTlv(pOutbuf, iOffset, 4, 1, &pVoicePktCap->httpDownload);
+    iOffset = appendTlv(pOutbuf, iOffset, 9, 1, &pVoicePktCap->nvramInfoStorage);
+    iOffset = appendTlv(pOutbuf, iOffset, 11, 3, pVoicePktCap->supportedCodecs);
+    iOffset = appendTlv(pOutbuf, iOffset, 12, 1, &pVoicePktCap->silenceSuppression);
+    iOffset = appendTlv(pOutbuf, iOffset, 13, 1, &pVoicePktCap->echoCancellation);
+    iOffset = appendTlv(pOutbuf, iOffset, 15, 1, &pVoicePktCap->ugsAd);
+    iOffset = appendTlv(pOutbuf, iOffset, 16, 1, &pVoicePktCap->ifIndexStart);
+    uint16_t ui16ProvFlow = htons(pVoicePktCap->supportedProvFlow);
+    iOffset = appendTlv(pOutbuf, iOffset, 18, 2, &ui16ProvFlow);
+    iOffset = appendTlv(pOutbuf, iOffset, 19, 1, &pVoicePktCap->t38Version);
+    iOffset = appendTlv(pOutbuf, iOffset, 20, 1, &pVoicePktCap->t38ErrorCorrection);
+    iOffset = appendTlv(pOutbuf, iOffset, 21, 1, &pVoicePktCap->rfc2833);
+    iOffset = appendTlv(pOutbuf, iOffset, 22, 1, &pVoicePktCap->voiceMetrics);
+    iOffset = appendTlv(pOutbuf, iOffset, 23, 3, pVoicePktCap->supportedMibs);
+    iOffset = appendTlv(pOutbuf, iOffset, 24, 1, &pVoicePktCap->multiGrants);
+    iOffset = appendTlv(pOutbuf, iOffset, 25, 1, &pVoicePktCap->v_152);
+    iOffset = appendTlv(pOutbuf, iOffset, 26, 1, &pVoicePktCap->certBootstrapping);
+    iOffset = appendTlv(pOutbuf, iOffset, 38, 1, &pVoicePktCap->ipAddrProvCap);
+    return iOffset;
+}
+
+void readDhcpOptionsFromHal(void)
+{
+    VoicePktcCapabilitiesType sVoicePktcCapabilities;
+
+	uint8_t ui8Ret = voice_hal_get_pktc_capabilities(&sVoicePktcCapabilities);
+	CcspTraceInfo(("In %s ui8Ret = %d\n", __FUNCTION__, ui8Ret));
+	if(ui8Ret == RETURN_OK)
+	{
+		CcspTraceInfo(("voice_hal_get_pktc_capabilities success '%s'\n", __FUNCTION__));
+		CcspTraceError(("%s: pktcblVersion = %d\n", __FUNCTION__, sVoicePktcCapabilities.pktcblVersion));
+		CcspTraceError(("%s: numEndpoints = %d\n", __FUNCTION__, sVoicePktcCapabilities.numEndpoints));
+		CcspTraceError(("%s: tgtSupport = %d\n", __FUNCTION__, sVoicePktcCapabilities.tgtSupport));
+		CcspTraceError(("%s: httpDownload = %d\n", __FUNCTION__, sVoicePktcCapabilities.httpDownload));
+		CcspTraceError(("%s: nvramInfoStorage = %d\n", __FUNCTION__, sVoicePktcCapabilities.nvramInfoStorage));
+		CcspTraceError(("%s: supportedCodecs = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedCodecs[0]));
+		CcspTraceError(("%s: silenceSuppression = %d\n", __FUNCTION__, sVoicePktcCapabilities.silenceSuppression));
+		CcspTraceError(("%s: echoCancellation = %d\n", __FUNCTION__, sVoicePktcCapabilities.echoCancellation));
+		CcspTraceError(("%s: ugsAd = %d\n", __FUNCTION__, sVoicePktcCapabilities.ugsAd));
+		CcspTraceError(("%s: ifIndexStart = %d\n", __FUNCTION__, sVoicePktcCapabilities.ifIndexStart));
+		CcspTraceError(("%s: supportedProvFlow = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedProvFlow));
+		CcspTraceError(("%s: t38Version = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38Version));
+		CcspTraceError(("%s: t38ErrorCorrection = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38ErrorCorrection));
+		CcspTraceError(("%s: rfc2833 = %d\n", __FUNCTION__, sVoicePktcCapabilities.rfc2833));
+		CcspTraceError(("%s: voiceMetrics = %d\n", __FUNCTION__, sVoicePktcCapabilities.voiceMetrics));
+		CcspTraceError(("%s: supportedMibs = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedMibs[0]));
+		CcspTraceError(("%s: multiGrants = %d\n", __FUNCTION__, sVoicePktcCapabilities.multiGrants));
+		CcspTraceError(("%s: v_152 = %d\n", __FUNCTION__, sVoicePktcCapabilities.v_152));
+		CcspTraceError(("%s: certBootstrapping = %d\n", __FUNCTION__, sVoicePktcCapabilities.certBootstrapping));
+		CcspTraceError(("%s: ipAddrProvCap = %d\n", __FUNCTION__, sVoicePktcCapabilities.ipAddrProvCap));
+		// Using above data prepare the DHCP options value 43 and 125 in hex format
+		uint8_t ui8Buf43[128], ui8Buf125[128];
+        int iLen43 = packDhcpOption43(&sVoicePktcCapabilities, ui8Buf43);
+		CcspTraceError(("%s: DHCP Option 43 length = %d\n", __FUNCTION__, iLen43));
+		CcspTraceError(("%s: DHCP Option 43 hex = ", __FUNCTION__));
+        for (int i = 0; i < iLen43; i++) {
+			CcspTraceError(("%02X ", ui8Buf43[i]));
+		}
+		CcspTraceError(("\n"));
+		int iLen125 = packDhcpOption125(&sVoicePktcCapabilities, ui8Buf125);
+		CcspTraceError(("%s: DHCP Option 125 length = %d\n", __FUNCTION__, iLen125));
+		CcspTraceError(("%s: DHCP Option 125 hex = ", __FUNCTION__));
+		for (int i = 0; i < iLen125; i++) {
+			CcspTraceError(("%02X ", ui8Buf125[i]));
+		}
+		CcspTraceError(("\n"));
+
+	}
+	else
+	{
+		CcspTraceError(("voice_hal_get_pktc_capabilities failed '%s'\n", __FUNCTION__));
+	}
+}
+
+void prepareToStartUdhcpc(void)
+{
+	char cConfigMacVlanWithUdhcpc[8] = {0};
+	syscfg_get(NULL, "ConfigMacVlanWithUdhcpc", cConfigMacVlanWithUdhcpc, sizeof(cConfigMacVlanWithUdhcpc));
+
+	if (cConfigMacVlanWithUdhcpc[0] != '\0' && strcmp(cConfigMacVlanWithUdhcpc, "true") == 0)
+	{
+		CcspTraceInfo(("Starting udhcpc with PartnerID %s\n", cConfigMacVlanWithUdhcpc));
+        // Read MODEL_NUM=SCER11BEL (XER10) or SCXF11BFL (XF10) by openning /etc/device.properties
+		FILE *pFILE = fopen("/etc/device.properties", "r");
+		if (pFILE != NULL)
+		{
+			char cLine[128] = {0};
+			while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
+			{
+				if (strncmp(cLine, "MODEL_NUM=", 10) == 0)
+				{
+					char *pModel = cLine + 10;
+					pModel[strcspn(pModel, "\n")] = 0; // Remove newline character
+					if (strcmp(pModel, "SCER11BEL") == 0 || strcmp(pModel, "SCXF11BFL") == 0)
+					{
+						CcspTraceInfo(("MODEL_NUM is %s, starting udhcpc with specific pid file\n", pModel));
+						system("udhcpc -i erouter0 -p /var/run/udhcpc_erouter0_mta.pid -b");
+						fclose(pFILE);
+						return;
+					}
+				}
+			}
+			fclose(pFILE);
+		}
+		else
+		{
+			CcspTraceWarning(("Failed to open /etc/device.properties\n"));
+		}
+	}
 }
 
 ANSC_STATUS
@@ -538,6 +705,7 @@ CosaMTAInitializeEthWanProvDhcpOption
             }
                         /*Coverity Fix  CID:120996 RESOURCE_LEAK */
                         free(pMtaProv);
+			prepareToStartUdhcpc();
 			return ANSC_STATUS_SUCCESS;
 		}
 		else
