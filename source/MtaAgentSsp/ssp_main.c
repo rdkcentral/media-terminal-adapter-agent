@@ -577,7 +577,7 @@ retry:
                                         if (buffer)
                                         {
                                             /* Coverity Fix : CHECKED_RETURN */
-                                            size_t bytesRead = fread(buffer, 1, length+1, fptr);
+                                            size_t bytesRead = fread(buffer, 1, length, fptr);
                                             if (bytesRead > 0) {
                                                buffer[bytesRead] = '\0'; 
                                                CcspTraceInfo(("buffer=%s\n", buffer));
@@ -654,7 +654,7 @@ retry:
                                     if (buffer)
                                     {
                                         /* Coverity Fix : CHECKED_RETURN */
-                                        size_t bytesRead = fread(buffer, 1, length+1, fptr);
+                                        size_t bytesRead = fread(buffer, 1, length, fptr);
                                         if (bytesRead > 0) {
                                             buffer[bytesRead] = '\0'; 
                                             CcspTraceInfo(("buffer=%s\n", buffer));
