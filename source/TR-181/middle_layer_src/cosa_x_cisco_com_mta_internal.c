@@ -800,11 +800,10 @@ CosaMTAInitializeEthWanProv
  PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)hThisObject;
  pMyObject->pmtaprovinfo = (PCOSA_MTA_ETHWAN_PROV_INFO)AnscAllocateMemory(sizeof(COSA_MTA_ETHWAN_PROV_INFO));
 
- CosaMTAInitializeEthWanProvJournal(pMyObject->pmtaprovinfo);
-
 /* Coverity Fix : NULL_RETURNS */
 if(pMtaProv && pMyObject->pmtaprovinfo)
 {
+    CosaMTAInitializeEthWanProvJournal(pMyObject->pmtaprovinfo);
 	/* CID  173808  Uninitialized scalar variable */
 	pMtaProv->MtaIPMode = MTA_IPV4;
 

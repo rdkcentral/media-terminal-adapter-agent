@@ -1326,10 +1326,9 @@ ANSC_STATUS fillCurrentPartnerId
 	    	/* CID 66248 Array compared against NULL fix */
                 if( buf[0] != '\0' )
                 {
-                        size_t n = strlen(buf);
-                        strncpy(pValue ,buf,strlen(buf));
                         /* Coverity Fix : STRING_NULL */
-                        pValue[n] = '\0';
+                        size_t n = strlen(buf);
+                        snprintf(pValue, n + 1, "%s", buf);
                         *pulSize = AnscSizeOfString(pValue);
                         return ANSC_STATUS_SUCCESS;
                 }
