@@ -1326,7 +1326,10 @@ ANSC_STATUS fillCurrentPartnerId
 	    	/* CID 66248 Array compared against NULL fix */
                 if( buf[0] != '\0' )
                 {
+                        size_t n = strlen(buf);
                         strncpy(pValue ,buf,strlen(buf));
+                        /* Coverity Fix : STRING_NULL */
+                        pValue[n] = '\0';
                         *pulSize = AnscSizeOfString(pValue);
                         return ANSC_STATUS_SUCCESS;
                 }
@@ -1773,7 +1776,11 @@ ANSC_STATUS UpdateJsonParam
                                             FILE *fp = fopen(CLEAR_TRACK_FILE, "r");
                                             if (fp)
                                             {
-                                                fscanf(fp, "%u", &flags);
+                                                /* Coverity Fix : CHECKED_RETURN */
+                                                if (fscanf(fp, "%u", &flags) != 1) {
+                                                    CcspTraceWarning(("%s: Failed to read flags from %s, defaulting to 0\n", __FUNCTION__, CLEAR_TRACK_FILE));
+                                                    flags = 0;
+                                                }
                                                 fclose(fp);
                                             }
                                             if ((flags & NVRAM_BOOTSTRAP_CLEARED) == 0)

@@ -558,10 +558,11 @@ pErr TR104_Process_Webconfig_Request(void *Data)
             {
                 fseek (fptr_dummy, 0, SEEK_END);
                 length = ftell (fptr_dummy);
-                fseek (fptr_dummy, 0, SEEK_SET);
-                buffer = (char*)malloc(length+1);
-                if (buffer)
-                {
+                if (length >= 0) {
+                  fseek (fptr_dummy, 0, SEEK_SET);
+                  buffer = (char*)malloc(length+1);
+                  if (buffer)
+                  {
                     /* Coverity Fix CID : 190019 Ignoring number of bytes read */
                     size_t bytesRead = fread (buffer, 1, length, fptr_dummy); 
                     if (bytesRead == (size_t)length) 
@@ -573,8 +574,9 @@ pErr TR104_Process_Webconfig_Request(void *Data)
                     {
                         CcspTraceError(("%s: fread incomplete. Expected %d bytes, got %zu bytes.\n", __FUNCTION__, length, bytesRead));
                     }
-                }
+                  }
                 CcspTraceDebug(("%s:base64 has been copied to original file with length=%u\n",__FUNCTION__,length));
+                }
                 fclose(fptr_dummy);
 		/* CID 190026 Unchecked return value from library */
 		int retrmv =  remove("/nvram/.vsb64_temp.txt");

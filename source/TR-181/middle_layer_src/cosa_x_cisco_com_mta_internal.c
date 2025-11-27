@@ -372,8 +372,9 @@ CosaMTAInitializeEthWanProvDhcpOption
                                    }
                                    return ANSC_STATUS_FAILURE;
                                }
-                        x=0;
-                        y=0;
+                        /* Coverity  fix CID : 340667 Unused Value */
+                        //x=0;
+                        //y=0;
 			}
 			else
 			{
@@ -426,8 +427,9 @@ CosaMTAInitializeEthWanProvDhcpOption
                                     }
                                     return ANSC_STATUS_FAILURE;
                                 }
-                                x=0;
-                                y=0;
+                                /* Coverity  fix CID : 340667 Unused Value */
+                                //x=0;
+                                //y=0;
 				memset(pMtaProv->DhcpOption2171CccV6DssID1,0,MTA_DHCPOPTION122CCCV6DSSID1_MAX);
 			}
 
@@ -800,7 +802,8 @@ CosaMTAInitializeEthWanProv
 
  CosaMTAInitializeEthWanProvJournal(pMyObject->pmtaprovinfo);
 
-if(pMtaProv)
+/* Coverity Fix : NULL_RETURNS */
+if(pMtaProv && pMyObject->pmtaprovinfo)
 {
 	/* CID  173808  Uninitialized scalar variable */
 	pMtaProv->MtaIPMode = MTA_IPV4;
@@ -998,6 +1001,8 @@ else
 	{
 		printf("Memory Alloction Failed '%s'\n", __FUNCTION__);
 		CcspTraceError(("Memory Alloction Failed '%s'\n", __FUNCTION__));
+        if (pMtaProv) 
+            free(pMtaProv);
 		return ANSC_STATUS_FAILURE;
 	}  
 
