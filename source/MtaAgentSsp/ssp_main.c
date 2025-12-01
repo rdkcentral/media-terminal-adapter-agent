@@ -576,9 +576,15 @@ retry:
                                         buffer = (char*)malloc(length+1);
                                         if (buffer)
                                         {
-                                            fread(buffer, 1, length+1, fptr);
-                                            CcspTraceInfo(("buffer=%s\n",buffer));
-                                            CosaDmlTR104DataSet(buffer,1);
+                                            /* Coverity Fix : CHECKED_RETURN */
+                                            size_t bytesRead = fread(buffer, 1, length, fptr);
+                                            if (bytesRead > 0) {
+                                               buffer[bytesRead] = '\0'; 
+                                               CcspTraceInfo(("buffer=%s\n", buffer));
+                                               CosaDmlTR104DataSet(buffer, 1);
+                                            } else {
+                                               CcspTraceWarning(("fread failed or returned 0 bytes\n"));
+                                            }
                                             free(buffer);
                                         }
                                         fclose(fptr);
@@ -647,9 +653,15 @@ retry:
                                     buffer = (char*)malloc (length+1);
                                     if (buffer)
                                     {
-                                        fread (buffer, 1, length+1, fptr);
-                                        CcspTraceDebug(("buffer=%s\n",buffer));
-                                        CosaDmlTR104DataSet(buffer,1);
+                                        /* Coverity Fix : CHECKED_RETURN */
+                                        size_t bytesRead = fread(buffer, 1, length, fptr);
+                                        if (bytesRead > 0) {
+                                            buffer[bytesRead] = '\0'; 
+                                            CcspTraceInfo(("buffer=%s\n", buffer));
+                                            CosaDmlTR104DataSet(buffer, 1);
+                                        } else {
+                                            CcspTraceWarning(("fread failed or returned 0 bytes\n"));
+                                        }
                                         free(buffer);
                                     }
                                     fclose (fptr);
