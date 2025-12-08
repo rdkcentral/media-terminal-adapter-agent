@@ -628,7 +628,186 @@ void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject)
 
  PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)hThisObject;
 
- char current_wan_state[10] = {0}, dhcp_option[10] = {0};
+ char current_wan_state[32] = {0}, dhcp_option[64] = {0};
+
+ int err;
+ char name[64]={0}, val[64]={0};
+ errno_t rc = -1;
+ int ind = -1;
+ async_id_t getnotification_asyncid;
+ async_id_t wan_state_asyncid;
+ async_id_t dhcp_mta_asyncid;
+
+ int retValue=0,  namelen=0, vallen =0 ;
+ sysevent_set_options(sysevent_fd, sysevent_token, "current_wan_state", TUPLE_FLAG_EVENT);
+
+sysevent_set_options(sysevent_fd, sysevent_token, "dhcp_mta_option", TUPLE_FLAG_EVENT);
+sysevent_set_options(sysevent_fd, sysevent_token, "dhcp_option", TUPLE_FLAG_EVENT);
+
+ retValue=sysevent_setnotification(sysevent_fd, sysevent_token, "current_wan_state",  &wan_state_asyncid);
+
+ CcspTraceWarning(("%s Return value of current wan state is   %d\n",__FUNCTION__,retValue));
+ if (retValue != 0) {
+    CcspTraceError(("%s setnotification(current_wan_state) failed: rc=%d\n", __FUNCTION__, retValue));
+    /* handle or retry */
+ }
+ CcspTraceWarning(("%s setnotification(current_wan_state) success \n", __FUNCTION__));
+
+retValue = sysevent_setnotification(sysevent_fd, sysevent_token, "dhcp_mta_option",  &dhcp_mta_asyncid);
+CcspTraceWarning(("%s Return value of dhcp mta option is   %d\n",__FUNCTION__,retValue));
+ if (retValue != 0) {
+    CcspTraceError(("%s setnotification(dhcp_mta_option) failed: rc=%d\n", __FUNCTION__, retValue));
+    /* handle or retry */
+ }
+ CcspTraceWarning(("%s setnotification(dhcp_mta_option) success \n", __FUNCTION__));
+
+retValue = sysevent_setnotification(sysevent_fd, sysevent_token, "dhcp_option",  &getnotification_asyncid);
+CcspTraceWarning(("%s Return value of dhcp option is   %d\n",__FUNCTION__,retValue));
+ if (retValue != 0) {
+    CcspTraceError(("%s setnotification(dhcp_option) failed: rc=%d\n", __FUNCTION__, retValue));
+    /* handle or retry */
+ }
+ CcspTraceWarning(("%s setnotification(dhcp_option) success \n", __FUNCTION__));
+
+ //CcspTraceWarning(("%s Return value is   %d\n",__FUNCTION__,retValue));
+
+ sysevent_get(sysevent_fd, sysevent_token, "current_wan_state", current_wan_state, sizeof(current_wan_state));
+ sysevent_get(sysevent_fd, sysevent_token, "dhcp_mta_option", dhcp_option, sizeof(dhcp_option));
+
+if (dhcp_option[0] == '\0') {
+    sysevent_get(sysevent_fd, sysevent_token, "dhcp_option",   dhcp_option, sizeof(dhcp_option));
+}
+
+ char value[16] = {'\0'};
+ bool tr104ApplySuccess = false;
+
+ char ethWanSyscfg[64]={'\0'};
+ bool mtaInEthernetMode = false;
+ if( (0 == syscfg_get( NULL, "eth_wan_enabled", ethWanSyscfg, sizeof(ethWanSyscfg))) && ((ethWanSyscfg[0] != '\0') && (strncmp(ethWanSyscfg, "true", strlen("true")) == 0)))
+ {
+    mtaInEthernetMode = true;
+ }
+
+ CcspTraceError(("%s:%d MTA started in %s mode. \n",__FUNCTION__,__LINE__, mtaInEthernetMode?"Ethernet":"DOCSIS"));
+
+ rc = strcmp_s((const char*)current_wan_state, sizeof(current_wan_state), "up", &ind);
+ ERR_CHK(rc);
+ if((rc == EOK) && (ind == 0))
+ {
+     if(mtaInEthernetMode)
+     {
+         rc = strcmp_s((const char*)dhcp_option, sizeof(dhcp_option), "received", &ind);
+         ERR_CHK(rc);
+         if((rc == EOK) && (ind == 0))
+         {
+             CcspTraceWarning(("%s current_wan_state up, Initializing MTA \n",__FUNCTION__));
+             CosaMTAInitializeEthWanProvDhcpOption(pMyObject);
+         }
+         else if((rc == EOK) && (ind != 0))
+         {
+             CcspTraceWarning(("%s current_wan_state up, but dhcp_option's not received.  \n",__FUNCTION__));
+             WaitForDhcpOption();
+             CosaMTAInitializeEthWanProvDhcpOption(pMyObject);
+         }
+
+		 bool option_ready =
+                (strncmp(dhcp_option, "received", 8) == 0) ||
+                (strncmp(dhcp_option, "ready", 5) == 0) ||
+                (strncmp(dhcp_option, "received_v4", 11) == 0) ||
+                (strncmp(dhcp_option, "received_v6", 11) == 0);
+
+            if (option_ready) {
+                CcspTraceWarning(("%s WAN up, DHCP option ready ('%s') → Initialize MTA\n",
+                                  __FUNCTION__, dhcp_option));
+                CosaMTAInitializeEthWanProvDhcpOption(pMyObject);
+            } else {
+                CcspTraceWarning(("%s current_wan_state up, but dhcp option not received yet (val='%s')\n",
+                                  __FUNCTION__, dhcp_option));
+                /* Wait up to configured time; consider short retries to avoid 60s stall */
+                WaitForDhcpOption();
+                CosaMTAInitializeEthWanProvDhcpOption(pMyObject);
+            }
+		}
+ }
+
+  do
+  {
+
+    namelen = sizeof(name);
+    vallen  = sizeof(val);
+
+    rc = memset_s(name, sizeof(name), 0, sizeof(name));
+    ERR_CHK(rc);
+    rc = memset_s(val, sizeof(val), 0, sizeof(val));
+    ERR_CHK(rc);
+
+    err = sysevent_getnotification(sysevent_fd, sysevent_token, name, &namelen, val, &vallen, &getnotification_asyncid);
+
+    if (!err)
+    {
+        CcspTraceWarning(("%s Recieved notification event  %s, state %s\n",__FUNCTION__,name,val));
+        rc = strcmp_s((const char*)name, sizeof(name), "current_wan_state", &ind);
+        ERR_CHK(rc);
+        if((rc == EOK) && (ind == 0))
+        {
+            rc = strcmp_s((const char*)val, sizeof(val), "up", &ind);
+            ERR_CHK(rc);
+            if((rc == EOK) && (ind == 0))
+            {
+                bool isEthEnabled = false;
+                bool tr104Enable = false;
+                if( (0 == syscfg_get( NULL, "eth_wan_enabled", ethWanSyscfg, sizeof(ethWanSyscfg))) && ((ethWanSyscfg[0] != '\0') && (strncmp(ethWanSyscfg, "true", strlen("true")) == 0)))
+                {
+                    isEthEnabled = true;
+                }
+              
+                if((syscfg_get(NULL,"TR104enable", value, sizeof(value)) == 0) && (strcmp(value, "true") == 0))
+                {  
+    		    tr104Enable = true;
+ 		}
+              
+  		CcspTraceWarning((" %s:: tr104Enable: %s \n",__FUNCTION__, value ));
+   		memset_s(value,sizeof(value),0,sizeof(value));
+        
+                if(sysevent_get(sysevent_fd, sysevent_token, "tr104_applied", value, sizeof(value)) == 0)
+                {
+   		    tr104ApplySuccess = (strcmp(value, "true") == 0);
+   		    CcspTraceWarning((" %s:: tr104_applied: %s tr104ApplySuccess=%d \n",__FUNCTION__, value ,tr104ApplySuccess ));
+ 		} 
+                else
+                {
+   		    CcspTraceError(("%s:%d tr104 not applied :value =%s \n",__FUNCTION__,__LINE__,value));
+   		    tr104ApplySuccess = false;
+                }
+                
+                CcspTraceWarning((" %s:: mtaInEthernetMode: %s tr104Enable: %s tr104ApplySuccess: %s \n",__FUNCTION__, mtaInEthernetMode ?"true":"false" ,tr104Enable ?"true":"false" ,tr104ApplySuccess ?"true":"false" ));
+
+                if(mtaInEthernetMode != isEthEnabled)
+                {
+                    CcspTraceError(("%s:%d MTA is in incorrect WAN state. MTA started in %s, but selected WAN mode %s . MTA agent will be restarted.\n",__FUNCTION__,__LINE__, mtaInEthernetMode?"Ethernet":"DOCSIS", isEthEnabled?"Ethernet":"DOCSIS"));
+                    exit(0);
+                }
+                else if( (mtaInEthernetMode) && (tr104Enable) && (tr104ApplySuccess))
+                {
+                    CcspTraceWarning(("%s TR104 is Enabled in EthWan Mode, skipping Default config apply. \n",__FUNCTION__));
+                }
+                else if( ((mtaInEthernetMode) && (!tr104Enable)) ||  ((mtaInEthernetMode) && (tr104Enable) && (!tr104ApplySuccess)) )
+                {
+                    WaitForDhcpOption();
+                    CosaMTAInitializeEthWanProvDhcpOption(pMyObject);
+                }
+            }
+        }
+    }
+  }while(FOREVER); //FOREVER is 0 when unitTestDockerSupport is enabled, else FOREVER is 1.
+}
+
+/*void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject)
+{
+
+ PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)hThisObject;
+
+ char current_wan_state[32] = {0}, dhcp_option[10] = {0};
 
  int err;
  char name[25]={0}, val[10]={0};
@@ -749,7 +928,7 @@ void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject)
         }
     }
   }while(FOREVER); //FOREVER is 0 when unitTestDockerSupport is enabled, else FOREVER is 1.
-}
+}*/
 
 ANSC_STATUS CosaMTALineTableInitialize
     (
