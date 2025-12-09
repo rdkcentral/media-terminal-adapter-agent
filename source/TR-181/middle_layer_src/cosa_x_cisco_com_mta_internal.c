@@ -628,6 +628,9 @@ void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject)
 
  PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)hThisObject;
 
+  CcspTraceError(("%s Entering \n", __FUNCTION__));
+	error;
+
  char current_wan_state[32] = {0}, dhcp_option[64] = {0};
 
  int err;
