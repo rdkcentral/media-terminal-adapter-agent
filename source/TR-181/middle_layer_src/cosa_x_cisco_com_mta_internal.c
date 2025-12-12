@@ -78,6 +78,8 @@
 #include <sysevent/sysevent.h>
 #include "syscfg/syscfg.h"
 #include "voice_dhcp_hal.h"
+#include "ccsp/autoconf.h"
+#include "ccsp/platform_hal.h"
 
 #define MAX_BUFF_SIZE 128
 #define MAX_IP_PREF_VAL 6
@@ -177,172 +179,513 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
 
 }
 
-// Helper to append TLV
-static int appendTlv(uint8_t *pBuf, int iOffset, uint8_t ui8Type, uint8_t ui8Len, const void *pVal)
+#if defined (SCXF10)
+static void readMacAddress (char * pMacAddress)
 {
-    pBuf[iOffset++] = ui8Type;
-    pBuf[iOffset++] = ui8Len;
-    memcpy(&pBuf[iOffset], pVal, ui8Len);
-    return iOffset + ui8Len;
-}
-
-// Example IANA Enterprise Number (replace with your vendor if known)
-#define VENDOR_ENTERPRISE_NUM 3561
-
-int packDhcpOption125(const VoicePktcCapabilitiesType *pVoicePktCap, uint8_t *pOutbuf) {
-    int iOffset = 0;
-
-    // Pack IANA Enterprise Number (4 bytes, big-endian)
-    uint32_t vendorId = htonl(VENDOR_ENTERPRISE_NUM);
-    memcpy(&pOutbuf[iOffset], &vendorId, 4);
-    iOffset += 4;
-
-    // Pack TLVs (suboptions) - similar to Option 43
-    iOffset = appendTlv(pOutbuf, iOffset, 1, 1, &pVoicePktCap->pktcblVersion);
-    iOffset = appendTlv(pOutbuf, iOffset, 2, 1, &pVoicePktCap->numEndpoints);
-    iOffset = appendTlv(pOutbuf, iOffset, 3, 1, &pVoicePktCap->tgtSupport);
-    iOffset = appendTlv(pOutbuf, iOffset, 4, 1, &pVoicePktCap->httpDownload);
-    iOffset = appendTlv(pOutbuf, iOffset, 9, 1, &pVoicePktCap->nvramInfoStorage);
-    iOffset = appendTlv(pOutbuf, iOffset, 11, 3, pVoicePktCap->supportedCodecs);
-    iOffset = appendTlv(pOutbuf, iOffset, 12, 1, &pVoicePktCap->silenceSuppression);
-    iOffset = appendTlv(pOutbuf, iOffset, 13, 1, &pVoicePktCap->echoCancellation);
-    iOffset = appendTlv(pOutbuf, iOffset, 15, 1, &pVoicePktCap->ugsAd);
-    iOffset = appendTlv(pOutbuf, iOffset, 16, 1, &pVoicePktCap->ifIndexStart);
-    uint16_t ui16ProvFlow = htons(pVoicePktCap->supportedProvFlow);
-    iOffset = appendTlv(pOutbuf, iOffset, 18, 2, &ui16ProvFlow);
-    iOffset = appendTlv(pOutbuf, iOffset, 19, 1, &pVoicePktCap->t38Version);
-    iOffset = appendTlv(pOutbuf, iOffset, 20, 1, &pVoicePktCap->t38ErrorCorrection);
-    iOffset = appendTlv(pOutbuf, iOffset, 21, 1, &pVoicePktCap->rfc2833);
-    iOffset = appendTlv(pOutbuf, iOffset, 22, 1, &pVoicePktCap->voiceMetrics);
-    iOffset = appendTlv(pOutbuf, iOffset, 23, 3, pVoicePktCap->supportedMibs);
-    iOffset = appendTlv(pOutbuf, iOffset, 24, 1, &pVoicePktCap->multiGrants);
-    iOffset = appendTlv(pOutbuf, iOffset, 25, 1, &pVoicePktCap->v_152);
-    iOffset = appendTlv(pOutbuf, iOffset, 26, 1, &pVoicePktCap->certBootstrapping);
-    iOffset = appendTlv(pOutbuf, iOffset, 38, 1, &pVoicePktCap->ipAddrProvCap);
-
-    // Optionally, add an end marker if your client expects it (not required by RFC)
-    // pOutbuf[iOffset++] = 0xFF;
-
-    return iOffset;
-}
-
-// Option 43: simple TLV packing (example: ASCII or direct TLV)
-int packDhcpOption43(const VoicePktcCapabilitiesType *pVoicePktCap, uint8_t *pOutbuf) {
-    int iOffset = 0;
-    iOffset = appendTlv(pOutbuf, iOffset, 1, 1, &pVoicePktCap->pktcblVersion);
-    iOffset = appendTlv(pOutbuf, iOffset, 2, 1, &pVoicePktCap->numEndpoints);
-    iOffset = appendTlv(pOutbuf, iOffset, 3, 1, &pVoicePktCap->tgtSupport);
-    iOffset = appendTlv(pOutbuf, iOffset, 4, 1, &pVoicePktCap->httpDownload);
-    iOffset = appendTlv(pOutbuf, iOffset, 9, 1, &pVoicePktCap->nvramInfoStorage);
-    iOffset = appendTlv(pOutbuf, iOffset, 11, 3, pVoicePktCap->supportedCodecs);
-    iOffset = appendTlv(pOutbuf, iOffset, 12, 1, &pVoicePktCap->silenceSuppression);
-    iOffset = appendTlv(pOutbuf, iOffset, 13, 1, &pVoicePktCap->echoCancellation);
-    iOffset = appendTlv(pOutbuf, iOffset, 15, 1, &pVoicePktCap->ugsAd);
-    iOffset = appendTlv(pOutbuf, iOffset, 16, 1, &pVoicePktCap->ifIndexStart);
-    uint16_t ui16ProvFlow = htons(pVoicePktCap->supportedProvFlow);
-    iOffset = appendTlv(pOutbuf, iOffset, 18, 2, &ui16ProvFlow);
-    iOffset = appendTlv(pOutbuf, iOffset, 19, 1, &pVoicePktCap->t38Version);
-    iOffset = appendTlv(pOutbuf, iOffset, 20, 1, &pVoicePktCap->t38ErrorCorrection);
-    iOffset = appendTlv(pOutbuf, iOffset, 21, 1, &pVoicePktCap->rfc2833);
-    iOffset = appendTlv(pOutbuf, iOffset, 22, 1, &pVoicePktCap->voiceMetrics);
-    iOffset = appendTlv(pOutbuf, iOffset, 23, 3, pVoicePktCap->supportedMibs);
-    iOffset = appendTlv(pOutbuf, iOffset, 24, 1, &pVoicePktCap->multiGrants);
-    iOffset = appendTlv(pOutbuf, iOffset, 25, 1, &pVoicePktCap->v_152);
-    iOffset = appendTlv(pOutbuf, iOffset, 26, 1, &pVoicePktCap->certBootstrapping);
-    iOffset = appendTlv(pOutbuf, iOffset, 38, 1, &pVoicePktCap->ipAddrProvCap);
-    return iOffset;
-}
-
-void readDhcpOptionsFromHal(void)
-{
-    VoicePktcCapabilitiesType sVoicePktcCapabilities;
-
-	uint8_t ui8Ret = voice_hal_get_pktc_capabilities(&sVoicePktcCapabilities);
-	CcspTraceInfo(("In %s ui8Ret = %d\n", __FUNCTION__, ui8Ret));
-	if(ui8Ret == RETURN_OK)
+	FILE *pFILE = fopen("/tmp/factory_nvram.data", "r");
+	if (pFILE != NULL)
 	{
-		CcspTraceInfo(("voice_hal_get_pktc_capabilities success '%s'\n", __FUNCTION__));
-		CcspTraceError(("%s: pktcblVersion = %d\n", __FUNCTION__, sVoicePktcCapabilities.pktcblVersion));
-		CcspTraceError(("%s: numEndpoints = %d\n", __FUNCTION__, sVoicePktcCapabilities.numEndpoints));
-		CcspTraceError(("%s: tgtSupport = %d\n", __FUNCTION__, sVoicePktcCapabilities.tgtSupport));
-		CcspTraceError(("%s: httpDownload = %d\n", __FUNCTION__, sVoicePktcCapabilities.httpDownload));
-		CcspTraceError(("%s: nvramInfoStorage = %d\n", __FUNCTION__, sVoicePktcCapabilities.nvramInfoStorage));
-		CcspTraceError(("%s: supportedCodecs = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedCodecs[0]));
-		CcspTraceError(("%s: silenceSuppression = %d\n", __FUNCTION__, sVoicePktcCapabilities.silenceSuppression));
-		CcspTraceError(("%s: echoCancellation = %d\n", __FUNCTION__, sVoicePktcCapabilities.echoCancellation));
-		CcspTraceError(("%s: ugsAd = %d\n", __FUNCTION__, sVoicePktcCapabilities.ugsAd));
-		CcspTraceError(("%s: ifIndexStart = %d\n", __FUNCTION__, sVoicePktcCapabilities.ifIndexStart));
-		CcspTraceError(("%s: supportedProvFlow = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedProvFlow));
-		CcspTraceError(("%s: t38Version = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38Version));
-		CcspTraceError(("%s: t38ErrorCorrection = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38ErrorCorrection));
-		CcspTraceError(("%s: rfc2833 = %d\n", __FUNCTION__, sVoicePktcCapabilities.rfc2833));
-		CcspTraceError(("%s: voiceMetrics = %d\n", __FUNCTION__, sVoicePktcCapabilities.voiceMetrics));
-		CcspTraceError(("%s: supportedMibs = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedMibs[0]));
-		CcspTraceError(("%s: multiGrants = %d\n", __FUNCTION__, sVoicePktcCapabilities.multiGrants));
-		CcspTraceError(("%s: v_152 = %d\n", __FUNCTION__, sVoicePktcCapabilities.v_152));
-		CcspTraceError(("%s: certBootstrapping = %d\n", __FUNCTION__, sVoicePktcCapabilities.certBootstrapping));
-		CcspTraceError(("%s: ipAddrProvCap = %d\n", __FUNCTION__, sVoicePktcCapabilities.ipAddrProvCap));
-		// Using above data prepare the DHCP options value 43 and 125 in hex format
-		uint8_t ui8Buf43[128], ui8Buf125[128];
-        int iLen43 = packDhcpOption43(&sVoicePktcCapabilities, ui8Buf43);
-		CcspTraceError(("%s: DHCP Option 43 length = %d\n", __FUNCTION__, iLen43));
-		CcspTraceError(("%s: DHCP Option 43 hex = ", __FUNCTION__));
-        for (int i = 0; i < iLen43; i++) {
-			CcspTraceError(("%02X ", ui8Buf43[i]));
-		}
-		CcspTraceError(("\n"));
-		int iLen125 = packDhcpOption125(&sVoicePktcCapabilities, ui8Buf125);
-		CcspTraceError(("%s: DHCP Option 125 length = %d\n", __FUNCTION__, iLen125));
-		CcspTraceError(("%s: DHCP Option 125 hex = ", __FUNCTION__));
-		for (int i = 0; i < iLen125; i++) {
-			CcspTraceError(("%02X ", ui8Buf125[i]));
-		}
-		CcspTraceError(("\n"));
-
-	}
-	else
-	{
-		CcspTraceError(("voice_hal_get_pktc_capabilities failed '%s'\n", __FUNCTION__));
-	}
-}
-
-void prepareToStartUdhcpc(void)
-{
-	char cConfigMacVlanWithUdhcpc[8] = {0};
-	syscfg_get(NULL, "ConfigMacVlanWithUdhcpc", cConfigMacVlanWithUdhcpc, sizeof(cConfigMacVlanWithUdhcpc));
-
-	if (cConfigMacVlanWithUdhcpc[0] != '\0' && strcmp(cConfigMacVlanWithUdhcpc, "true") == 0)
-	{
-		CcspTraceInfo(("Starting udhcpc with PartnerID %s\n", cConfigMacVlanWithUdhcpc));
-        // Read MODEL_NUM=SCER11BEL (XER10) or SCXF11BFL (XF10) by openning /etc/device.properties
-		FILE *pFILE = fopen("/etc/device.properties", "r");
-		if (pFILE != NULL)
+		char cLine[128] = {0};
+		while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
 		{
-			char cLine[128] = {0};
-			while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
+			if (strncmp(cLine, "EMTA ",5) == 0)
 			{
-				if (strncmp(cLine, "MODEL_NUM=", 10) == 0)
-				{
-					char *pModel = cLine + 10;
-					pModel[strcspn(pModel, "\n")] = 0; // Remove newline character
-					if (strcmp(pModel, "SCER11BEL") == 0 || strcmp(pModel, "SCXF11BFL") == 0)
-					{
-						CcspTraceInfo(("MODEL_NUM is %s, starting udhcpc with specific pid file\n", pModel));
-						system("udhcpc -i erouter0 -p /var/run/udhcpc_erouter0_mta.pid -b");
-						fclose(pFILE);
-						return;
-					}
-				}
+				char *pMac = cLine + 5;
+				pMac[strcspn(pMac, "\n")] = 0; // Remove newline character
+				strcpy_s(pMacAddress, 32, pMac);
+				break;
 			}
-			fclose(pFILE);
 		}
-		else
-		{
-			CcspTraceWarning(("Failed to open /etc/device.properties\n"));
-		}
+		fclose(pFILE);
 	}
+    else
+    {
+        CcspTraceError(("%s: Failed to open /tmp/factory_nvram.data\n", __FUNCTION__));
+    }
 }
 
+static void getDhcpOption43RawData (dhcpOption43RawData_t * pDhcpOption43RawData)
+{
+    if (NULL == pDhcpOption43RawData)
+    {
+        CcspTraceError(("%s: Invalid NULL pointer\n", __FUNCTION__));
+        return;
+    }
+
+    snprintf(pDhcpOption43RawData->cVendorName, sizeof(pDhcpOption43RawData->cVendorName), CONFIG_VENDOR_NAME);
+    snprintf(pDhcpOption43RawData->cOUID,sizeof(pDhcpOption43RawData->cOUID), CONFIG_VENDOR_ID);
+    if (RETURN_OK != platform_hal_GetModelName(pDhcpOption43RawData->cModelNumber))
+        CcspTraceError(("%s: platform_hal_GetModelName failed\n", __FUNCTION__));
+    if (RETURN_OK != platform_hal_GetSerialNumber(pDhcpOption43RawData->cSerialNumber))
+        CcspTraceError(("%s: platform_hal_GetSerialNumber failed\n", __FUNCTION__));
+    if (RETURN_OK != platform_hal_GetHardwareVersion(pDhcpOption43RawData->cHardwareVersion))
+        CcspTraceError(("%s: platform_hal_GetHardwareVersion failed\n", __FUNCTION__));
+    if (RETURN_OK != platform_hal_GetFirmwareName(pDhcpOption43RawData->cSoftwareVersion, sizeof(pDhcpOption43RawData->cSoftwareVersion)))
+        CcspTraceError(("%s: platform_hal_GetFirmwareName failed\n", __FUNCTION__));
+    if (RETURN_OK != platform_hal_GetBootloaderVersion(pDhcpOption43RawData->cBootLoaderVersion, sizeof(pDhcpOption43RawData->cBootLoaderVersion)))
+        CcspTraceError(("%s: platform_hal_GetBootloaderVersion failed\n", __FUNCTION__));
+    readMacAddress(pDhcpOption43RawData->cMtaMacAddress);
+
+    if (strlen(pDhcpOption43RawData->cMtaMacAddress) == 0)
+    {
+        CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
+        snprintf(pDhcpOption43RawData->cMtaMacAddress, sizeof(pDhcpOption43RawData->cMtaMacAddress), "78:B3:9F:8F:F2:25");
+    }
+
+    CcspTraceInfo(("%s: Serial Number = %s\n", __FUNCTION__, pDhcpOption43RawData->cSerialNumber));
+    CcspTraceInfo(("%s: Hardware Version = %s\n", __FUNCTION__, pDhcpOption43RawData->cHardwareVersion));
+    CcspTraceInfo(("%s: Software Version = %s\n", __FUNCTION__, pDhcpOption43RawData->cSoftwareVersion));
+    CcspTraceInfo(("%s: Bootloader Version = %s\n", __FUNCTION__, pDhcpOption43RawData->cBootLoaderVersion));
+    CcspTraceInfo(("%s: OUI = %s\n", __FUNCTION__, pDhcpOption43RawData->cOUID));
+    CcspTraceInfo(("%s: Model Number = %s\n", __FUNCTION__, pDhcpOption43RawData->cModelNumber));
+    CcspTraceInfo(("%s: Vendor Name = %s\n", __FUNCTION__, pDhcpOption43RawData->cVendorName));
+    CcspTraceInfo(("%s: MTA MAC Address = %s\n", __FUNCTION__, pDhcpOption43RawData->cMtaMacAddress));
+
+    return;
+}
+
+static int prepareDhcpOption43(const dhcpOption43RawData_t * pDhcpOption43RawData,char *pOutbuf, int iOutbufLen)
+{
+    if ((NULL == pDhcpOption43RawData) || (NULL == pOutbuf) || (iOutbufLen < 512)) {
+        return -1;
+    }
+    srand((unsigned int)time(NULL));
+    unsigned char cHexBuf[512] = {0};
+    int iIndex = 0;
+
+ // Type 02: EDVA identifier (fixed)
+    cHexBuf[iIndex++] = 0x02;  // Type
+    cHexBuf[iIndex++] = 0x04;  // Length = 4
+    cHexBuf[iIndex++] = 0x45;  // 'E'
+    cHexBuf[iIndex++] = 0x44;  // 'D'
+    cHexBuf[iIndex++] = 0x56;  // 'V'
+    cHexBuf[iIndex++] = 0x41;  // 'A'
+
+    CcspTraceInfo(("%s: EDVA Identifier:%02x %02x %02x %02x\n", __FUNCTION__,
+        cHexBuf[iIndex - 4], cHexBuf[iIndex - 3], cHexBuf[iIndex - 2], cHexBuf[iIndex - 1]));
+    // Type 04: Serial Number
+    size_t iSerialLen = strlen(pDhcpOption43RawData->cSerialNumber);
+    cHexBuf[iIndex++] = 0x04;  // Type
+    cHexBuf[iIndex++] = (unsigned char)iSerialLen;  // Length
+    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cSerialNumber, iSerialLen);
+    iIndex += iSerialLen;
+
+    // Type 05: Hardware Version
+    size_t iHardwareVerLen = strlen(pDhcpOption43RawData->cHardwareVersion);
+    cHexBuf[iIndex++] = 0x05;  // Type
+    cHexBuf[iIndex++] = (unsigned char)iHardwareVerLen;  // Length
+    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cHardwareVersion, iHardwareVerLen);
+    iIndex += iHardwareVerLen;
+
+    // Check for override file
+    FILE *pOverride = fopen("/tmp/mtaDhcpOption43.txt", "r");
+    int isOverride = (pOverride != NULL);
+    if (pOverride)
+        fclose(pOverride);
+
+    CcspTraceInfo(("%s: Software and Bootloader Version Override %s\n", __FUNCTION__, isOverride ? "ENABLED" : "DISABLED"));
+    // Type 06: software version
+    const char *pSoftwareVersion = isOverride ? "Prod_23_2_231009" : pDhcpOption43RawData->cSoftwareVersion;
+    size_t iSoftwareVerLen = strlen(pSoftwareVersion);
+    cHexBuf[iIndex++] = 0x06;  // Type
+    cHexBuf[iIndex++] = (unsigned char)iSoftwareVerLen;  // Length
+    memcpy(&cHexBuf[iIndex], pSoftwareVersion, iSoftwareVerLen);
+    iIndex += iSoftwareVerLen;
+
+    // Type 07: Bootloader Version
+    const char *pBootLoaderVersion = isOverride ? "S1TC-3.63.20.104" : pDhcpOption43RawData->cBootLoaderVersion;
+    size_t uiProductLen = strlen(pBootLoaderVersion);
+    cHexBuf[iIndex++] = 0x07;  // Type
+    cHexBuf[iIndex++] = (unsigned char)uiProductLen;  // Length
+    memcpy(&cHexBuf[iIndex], pBootLoaderVersion, uiProductLen);
+    iIndex += uiProductLen;
+
+    // Type 08: OUI
+    int iOuiLen = 3;//As per standard OUI length is 3 bytes
+#if 0
+    unsigned char cOui[3] = {0};
+    // Try to parse as hex string (e.g., "0030F4" or "00:30:F4")
+    if ((sscanf(pDhcpOption43RawData->cOUID, "%2hhx%2hhx%2hhx", &cOui[0], &cOui[1], &cOui[2]) != iOuiLen) &&
+       (sscanf(pDhcpOption43RawData->cOUID, "%2hhx:%2hhx:%2hhx", &cOui[0], &cOui[1], &cOui[2]) != iOuiLen)) {
+        CcspTraceError(("%s: Invalid OUI format from hal: %s\n", __FUNCTION__, pDhcpOption43RawData->cOUID));
+        //Hardcode default OUI which we got from internet for Sercomm Devices
+        cOui[0] = 0x00;
+        cOui[1] = 0x30;
+        cOui[2] = 0xF4;
+    }
+#endif
+    cHexBuf[iIndex++] = 0x08;  // Type
+    cHexBuf[iIndex++] = (unsigned char)iOuiLen;  // Length
+    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cOUID, iOuiLen);
+    iIndex += iOuiLen;
+
+    // Type 09: Model Number
+    size_t iModelLen = strlen(pDhcpOption43RawData->cModelNumber);
+    cHexBuf[iIndex++] = 0x09;  // Type
+    cHexBuf[iIndex++] = (unsigned char)iModelLen;  // Length
+    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cModelNumber, iModelLen);
+    iIndex += iModelLen;
+
+    // Type 0A: Vendor Name
+    size_t iVendorLen = strlen(pDhcpOption43RawData->cVendorName);
+    cHexBuf[iIndex++] = 0x0a;  // Type
+    cHexBuf[iIndex++] = (unsigned char)iVendorLen;  // Length
+    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cVendorName, iVendorLen);
+    iIndex += iVendorLen;
+
+    // Type 1F: MAC Address (6 bytes, binary format)
+    cHexBuf[iIndex++] = 0x1f;  // Type
+    cHexBuf[iIndex++] = 0x06;  // Length = 6 bytes
+    // Parse MAC address from string (e.g., "78:B3:9F:8F:F2:25" or "78b39f8ff225")
+    unsigned char mac[6];
+    if (sscanf(pDhcpOption43RawData->cMtaMacAddress, "%02x:%02x:%02x:%02x:%02x:%02x",
+               (unsigned int*)&mac[0], (unsigned int*)&mac[1], (unsigned int*)&mac[2],
+               (unsigned int*)&mac[3], (unsigned int*)&mac[4], (unsigned int*)&mac[5]) == 6) {
+        memcpy(&cHexBuf[iIndex], mac, 6);
+        iIndex += 6;
+    } else {
+        // Try without colons
+        if (sscanf(pDhcpOption43RawData->cMtaMacAddress, "%02x%02x%02x%02x%02x%02x",
+                   (unsigned int*)&mac[0], (unsigned int*)&mac[1], (unsigned int*)&mac[2],
+                   (unsigned int*)&mac[3], (unsigned int*)&mac[4], (unsigned int*)&mac[5]) == 6) {
+            memcpy(&cHexBuf[iIndex], mac, 6);
+            iIndex += 6;
+        }
+    }
+
+    // Type 20: Correlation ID (4 bytes, binary)
+    // Generate random correlation ID
+    uint32_t ui32CorrelationId = ((uint32_t)rand() << 16) | ((uint32_t)rand() & 0xFFFF);
+
+    cHexBuf[iIndex++] = 0x20;  // Type
+    cHexBuf[iIndex++] = 0x04;  // Length = 4 bytes
+    cHexBuf[iIndex++] = (unsigned char)((ui32CorrelationId >> 24) & 0xFF);
+    cHexBuf[iIndex++] = (unsigned char)((ui32CorrelationId >> 16) & 0xFF);
+    cHexBuf[iIndex++] = (unsigned char)((ui32CorrelationId >> 8) & 0xFF);
+    cHexBuf[iIndex++] = (unsigned char)(ui32CorrelationId & 0xFF);
+
+    CcspTraceInfo(("%s: Correlation ID: %08x\n", __FUNCTION__, ui32CorrelationId));
+
+    /* Convert to hex string with "0x2b:" prefix */
+    int iWritten = snprintf(pOutbuf, iOutbufLen, "0x2b:");
+    if (iWritten < 0 || iWritten >= iOutbufLen) {
+        return -1;
+    }
+
+    for (int i = 0; i < iIndex; i++) {
+        int iRet = snprintf(pOutbuf + iWritten, iOutbufLen - iWritten, "%02x", cHexBuf[i]);
+        if (iRet < 0 || (iWritten + iRet) >= iOutbufLen) {
+            return -1;
+        }
+        iWritten += iRet;
+    }
+    return iWritten;
+}
+static int prepareDhcpOption60(const VoicePktcCapabilitiesType *pVoicePktCap,char *pOutbuf, int iOutbufLen)
+{
+    if ((NULL == pVoicePktCap) || (NULL == pOutbuf) || (iOutbufLen < 200)) {
+        return -1;
+	}
+
+    unsigned char cHexBuf[512] = {0};
+    int iIndex = 0;
+    /* Vendor prefix (Technicolor/Comcast specific) */
+    cHexBuf[iIndex++] = 0x05;
+    cHexBuf[iIndex++] = 0x49;
+
+    /* Subopt 1: pktcblVersion */
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->pktcblVersion;
+
+    /* Subopt 2: numEndpoints */
+    cHexBuf[iIndex++] = 0x02;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->numEndpoints;
+
+    /* Subopt 3: tgtSupport */
+    cHexBuf[iIndex++] = 0x03;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->tgtSupport;
+
+    /* Subopt 4: httpDownload */
+    cHexBuf[iIndex++] = 0x04;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->httpDownload;
+
+    /* Subopt 9: nvramInfoStorage */
+    cHexBuf[iIndex++] = 0x09;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->nvramInfoStorage;
+
+    /* Subopt 11: supportedCodecs */
+    cHexBuf[iIndex++] = 0x0b;
+    //cHexBuf[iIndex++] = 0x0b;  // Length = 11 bytes
+    cHexBuf[iIndex++] = 0x03;  // Length = 3 bytes
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[0];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[1];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[2];
+     /*cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[3];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[4];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[5];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[6];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[7];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[8];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[9];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[10];*/
+
+    /* Subopt 12: silenceSuppression (mapped to subopt 0x0c) */
+    cHexBuf[iIndex++] = 0x0c;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->silenceSuppression;
+
+    /* Subopt 13: echoCancellation (mapped to subopt 0x0d) */
+    cHexBuf[iIndex++] = 0x0d;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->echoCancellation;
+
+    /* Subopt 15: ugsAd (mapped to subopt 0x0f) */
+    cHexBuf[iIndex++] = 0x0f;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->ugsAd;
+
+    /* Subopt 16: ifIndexStart (mapped to subopt 0x10) */
+    cHexBuf[iIndex++] = 0x10;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->ifIndexStart;
+
+    /* Subopt 18: supportedProvFlow (mapped to subopt 0x12) */
+    cHexBuf[iIndex++] = 0x12;
+    cHexBuf[iIndex++] = 0x02;  // Length = 2 bytes
+    cHexBuf[iIndex++] = 0x00;
+    cHexBuf[iIndex++] = pVoicePktCap->supportedProvFlow;
+
+    /* Subopt 19: t38Version (mapped to subopt 0x13) */
+    cHexBuf[iIndex++] = 0x13;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->t38Version;
+
+    /* Subopt 20: t38ErrorCorrection (mapped to subopt 0x14) */
+    cHexBuf[iIndex++] = 0x14;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->t38ErrorCorrection;
+
+    /* Subopt 21: rfc2833 (mapped to subopt 0x15) */
+    cHexBuf[iIndex++] = 0x15;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->rfc2833;
+
+    /* Subopt 22: voiceMetrics (mapped to subopt 0x16) */
+    cHexBuf[iIndex++] = 0x16;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->voiceMetrics;
+
+    /* Subopt 23: supportedMibs (mapped to subopt 0x17) */
+    cHexBuf[iIndex++] = 0x17;
+    cHexBuf[iIndex++] = 0x03;  // Length = 3 bytes
+    cHexBuf[iIndex++] = pVoicePktCap->supportedMibs[0];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedMibs[1];
+    cHexBuf[iIndex++] = pVoicePktCap->supportedMibs[2];
+
+    /* Subopt 24: multiGrants (mapped to subopt 0x18) */
+    cHexBuf[iIndex++] = 0x18;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->multiGrants;
+
+    /* Subopt 25: v_152 (mapped to subopt 0x19) */
+    cHexBuf[iIndex++] = 0x19;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->v_152;
+
+    /* Subopt 26: certBootstrapping (mapped to subopt 0x1a) */
+    cHexBuf[iIndex++] = 0x1a;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->certBootstrapping;
+
+    /* Subopt 38: ipAddrProvCap (mapped to subopt 0x26) */
+    cHexBuf[iIndex++] = 0x26;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = pVoicePktCap->ipAddrProvCap;
+
+    int iWritten = snprintf(pOutbuf, iOutbufLen, "pktc2.0:");
+    if (iWritten < 0 || iWritten >= iOutbufLen) {
+        return -1;
+    }
+
+    for (int iVar = 0; iVar < iIndex; iVar++) {
+        int iRet = snprintf(pOutbuf + iWritten, iOutbufLen - iWritten, "%02x", cHexBuf[iVar]);
+        if (iRet < 0 || iWritten + iRet >= iOutbufLen) {
+            return -1;
+        }
+        iWritten += iRet;
+    }
+    return iWritten;
+}
+
+static void readDhcpOptionsFromHal(char * pDhcpOption43, int iDhcpOption43Len, char *pDhcpOption60, int iDhcpOption60Len)
+{
+    if (NULL == pDhcpOption43 || NULL == pDhcpOption60 || iDhcpOption43Len < 512 || iDhcpOption60Len < 256)
+    {
+        CcspTraceError(("%s: Invalid NULL pointer or insufficient buffer length\n", __FUNCTION__));
+        return;
+    }
+    VoicePktcCapabilitiesType sVoicePktcCapabilities = {0};
+    CcspTraceInfo(("%s:<--->Sizeof(VoicePktcCapabilitiesType) = %zu\n", __FUNCTION__, sizeof(VoicePktcCapabilitiesType)));
+    uint8_t ui8Ret = voice_hal_get_pktc_capabilities(&sVoicePktcCapabilities);
+    CcspTraceInfo(("%s ui8Ret = %d\n", __FUNCTION__, ui8Ret));
+    if(ui8Ret == 1)
+    {
+        CcspTraceInfo(("Original: voice_hal_get_pktc_capabilities Values '%s'\n", __FUNCTION__));
+        CcspTraceInfo(("%s: pktcblVersion = %d\n", __FUNCTION__, sVoicePktcCapabilities.pktcblVersion));
+        CcspTraceInfo(("%s: numEndpoints = %d\n", __FUNCTION__, sVoicePktcCapabilities.numEndpoints));
+        CcspTraceInfo(("%s: tgtSupport = %d\n", __FUNCTION__, sVoicePktcCapabilities.tgtSupport));
+        CcspTraceInfo(("%s: httpDownload = %d\n", __FUNCTION__, sVoicePktcCapabilities.httpDownload));
+        CcspTraceInfo(("%s: nvramInfoStorage = %d\n", __FUNCTION__, sVoicePktcCapabilities.nvramInfoStorage));
+        /*CcspTraceInfo(("%s: supportedCodecs = %02x %02x %02x %2x %02x %02x %02x %02x %02x %02x %02x\n", __FUNCTION__,
+                    sVoicePktcCapabilities.supportedCodecs[0], sVoicePktcCapabilities.supportedCodecs[1], sVoicePktcCapabilities.supportedCodecs[2],
+                    sVoicePktcCapabilities.supportedCodecs[3], sVoicePktcCapabilities.supportedCodecs[4], sVoicePktcCapabilities.supportedCodecs[5],
+                    sVoicePktcCapabilities.supportedCodecs[6], sVoicePktcCapabilities.supportedCodecs[7], sVoicePktcCapabilities.supportedCodecs[8],
+                    sVoicePktcCapabilities.supportedCodecs[9], sVoicePktcCapabilities.supportedCodecs[10]));*/
+        CcspTraceInfo(("%s: supportedCodecs = %02x %02x %02x\n", __FUNCTION__,
+                    sVoicePktcCapabilities.supportedCodecs[0], sVoicePktcCapabilities.supportedCodecs[1], sVoicePktcCapabilities.supportedCodecs[2]));
+        CcspTraceInfo(("%s: silenceSuppression = %d\n", __FUNCTION__, sVoicePktcCapabilities.silenceSuppression));
+        CcspTraceInfo(("%s: echoCancellation = %d\n", __FUNCTION__, sVoicePktcCapabilities.echoCancellation));
+        CcspTraceInfo(("%s: ugsAd = %d\n", __FUNCTION__, sVoicePktcCapabilities.ugsAd));
+        CcspTraceInfo(("%s: ifIndexStart = %d\n", __FUNCTION__, sVoicePktcCapabilities.ifIndexStart));
+        CcspTraceInfo(("%s: supportedProvFlow = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedProvFlow));
+        CcspTraceInfo(("%s: t38Version = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38Version));
+        CcspTraceInfo(("%s: t38ErrorCorrection = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38ErrorCorrection));
+        CcspTraceInfo(("%s: rfc2833 = %d\n", __FUNCTION__, sVoicePktcCapabilities.rfc2833));
+        CcspTraceInfo(("%s: voiceMetrics = %d\n", __FUNCTION__, sVoicePktcCapabilities.voiceMetrics));
+        CcspTraceInfo(("%s: supportedMibs = %02x %02x %02x\n", __FUNCTION__, sVoicePktcCapabilities.supportedMibs[0], sVoicePktcCapabilities.supportedMibs[1], sVoicePktcCapabilities.supportedMibs[2]));
+        CcspTraceInfo(("%s: multiGrants = %d\n", __FUNCTION__, sVoicePktcCapabilities.multiGrants));
+        CcspTraceInfo(("%s: v_152 = %d\n", __FUNCTION__, sVoicePktcCapabilities.v_152));
+        CcspTraceInfo(("%s: certBootstrapping = %d\n", __FUNCTION__, sVoicePktcCapabilities.certBootstrapping));
+        CcspTraceInfo(("%s: ipAddrProvCap = %d\n", __FUNCTION__, sVoicePktcCapabilities.ipAddrProvCap));
+        // Using above data prepare the DHCP options value 43 and 125 in hex format
+        char cHexBuf[512] = {0};
+        dhcpOption43RawData_t dhcpOption43RawData = {0};
+        getDhcpOption43RawData(&dhcpOption43RawData);
+
+        int iLen43 = prepareDhcpOption43(&dhcpOption43RawData, cHexBuf, sizeof(cHexBuf));
+        CcspTraceInfo(("%s: DHCP Option 43 length = %d\n", __FUNCTION__, iLen43));
+        CcspTraceInfo(("%s: DHCP Option 43 hex = %s\n", __FUNCTION__, cHexBuf));
+
+        char cBufOption60[256] = {0};
+        int iLen60 = prepareDhcpOption60(&sVoicePktcCapabilities,cBufOption60, sizeof(cBufOption60));
+        CcspTraceInfo(("%s: DHCP Option 60 length = %d\n", __FUNCTION__, iLen60));
+        CcspTraceInfo(("%s: DHCP Option 60 hex = %s\n", __FUNCTION__, cBufOption60));
+        if (pDhcpOption43 != NULL) {
+            snprintf(pDhcpOption43, iDhcpOption43Len, "%s", cHexBuf);
+        }
+        if (pDhcpOption60 != NULL) {
+            snprintf(pDhcpOption60, iDhcpOption60Len, "%s", cBufOption60);
+        }
+    }
+    else
+    {
+        CcspTraceError(("voice_hal_get_pktc_capabilities failed '%s'\n", __FUNCTION__));
+    }
+}
+#if 0
+static bool isXf10OrXer10Model(void)
+{
+    char cModelNum[32] = {0};
+    if (RETURN_OK != platform_hal_GetModelName(cModelNum))
+    {
+        CcspTraceError(("%s: platform_hal_GetModelName failed\n", __FUNCTION__));
+        return false;
+    }
+    CcspTraceInfo(("%s: MODEL_NUM = %s\n", __FUNCTION__, cModelNum));
+#if 0
+    FILE *pFILE = fopen("/etc/device.properties", "r");
+    if (pFILE != NULL)
+    {
+        char cLine[128] = {0};
+        while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
+        {
+            if (strncmp(cLine, "MODEL_NUM=", 10) == 0)
+            {
+                char *pModel = cLine + 10;
+                pModel[strcspn(pModel, "\n")] = 0; // Remove newline character
+                strcpy_s(cModelNum, sizeof(cModelNum), pModel);
+                break;
+            }
+        }
+        fclose(pFILE);
+    }
+#endif
+    if (strcmp(cModelNum, "SCER11BEL") == 0 || strcmp(cModelNum, "SCXF11BFL") == 0)
+    {
+        return true;
+    }
+    return false;
+}
+#endif
+static void prepareToStartUdhcpc(void)
+{
+    char cConfigMacVlanWithUdhcpc[8] = {0};
+    syscfg_get(NULL, "ConfigMacVlanWithUdhcpc", cConfigMacVlanWithUdhcpc, sizeof(cConfigMacVlanWithUdhcpc));
+
+    if (cConfigMacVlanWithUdhcpc[0] == '\0' || strcmp(cConfigMacVlanWithUdhcpc, "true") != 0)
+    {
+        CcspTraceError(("%s:%d, ConfigMacVlanWithUdhcpc is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__));
+        return;
+    }
+    char cDhcpOption43[512] = {0};
+    char cDhcpOption60[512] = {0};
+    CcspTraceInfo(("%s:%d, Reading DHCP Options from HAL\n", __FUNCTION__, __LINE__));
+    readDhcpOptionsFromHal(cDhcpOption43, sizeof(cDhcpOption43), cDhcpOption60, sizeof(cDhcpOption60));
+
+    if ((cDhcpOption43[0] != '\0') || (cDhcpOption60[0] != '\0'))
+    {
+        //read mtaInterfaceName from syscfg and macVlan interface mac (EMTA 78:B3:9F:8F:F2:25) from /tmp/factory_nvram.data and create the macVlan interface using ip link add command
+        char cMtaInterfaceName[32] = {0};
+        syscfg_get(NULL, "mtaInterfaceName", cMtaInterfaceName, sizeof(cMtaInterfaceName));
+        if (cMtaInterfaceName[0] == '\0')
+        {
+            strcpy_s(cMtaInterfaceName, sizeof(cMtaInterfaceName), "voipIfname");
+        }
+        CcspTraceError(("%s:%d, MTA Interface Name is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName));
+        char cMacVlanMac[32] = {0};
+        readMacAddress(cMacVlanMac);
+        if (strlen(cMacVlanMac) == 0)
+        {
+            CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
+            snprintf(cMacVlanMac, sizeof(cMacVlanMac), "78:B3:9F:8F:F2:25");
+        }
+        CcspTraceError(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMacVlanMac));
+        if (cMacVlanMac[0] != '\0')
+        {
+            char cWanIfname[32] = {0};
+            syscfg_get(NULL, "wan_physical_ifname", cWanIfname, sizeof(cWanIfname));
+            CcspTraceInfo(("%s:%d, WAN Physical Ifname is %s\n", __FUNCTION__, __LINE__, cWanIfname));
+            if (cWanIfname[0] == '\0')
+            {
+                strcpy_s(cWanIfname, sizeof(cWanIfname), "erouter0");
+            }
+            //Create the macVlan
+            CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cMacVlanMac));
+            char cCmd[2048] = {0};
+            snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, cMtaInterfaceName);
+            system(cCmd);
+            snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", cMtaInterfaceName, cMacVlanMac);
+            system(cCmd);
+            snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", cMtaInterfaceName);
+            system(cCmd);
+            //Now run the udhcpc with dhcp option 43 and 125 like below
+            //udhcpc -O 23 -O 125 -i mtaIface -p /tmp/udhcpc.mtaIface.pid -x 0x7D:00000DE90101020201020301000401000901010B0306090F0C01010D01010F010110010912020004130101140101150101160101170302003F1801001901001A0100260101 -s /var/tmp/service_udhcpc
+            snprintf(cCmd, sizeof(cCmd), "udhcpc -O 2 -O 122 -O 4 -O 7 -O 43 -O 54 -O 99 -O 123 -O 125 -O timezone -V eRouter1.0 -x %s -i %s -p /tmp/udhcpc.%s.pid -V %s -s /var/tmp/service_udhcpc &", cDhcpOption43, cMtaInterfaceName, cMtaInterfaceName, cDhcpOption60);
+            system(cCmd);
+            CcspTraceInfo(("%s:%d, Started udhcpc for MTA on interface %s with cmd: %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cCmd));
+        }
+        else
+        {
+            CcspTraceWarning(("%s:%d, mtaMacAddress not found in /tmp/factory_nvram.data\n", __FUNCTION__, __LINE__));
+        }
+    }
+}
+#endif
 ANSC_STATUS
 CosaMTAInitializeEthWanProvDhcpOption
     (
@@ -539,8 +882,9 @@ CosaMTAInitializeEthWanProvDhcpOption
                                    }
                                    return ANSC_STATUS_FAILURE;
                                }
-                        x=0;
-                        y=0;
+                        /* Coverity  fix CID : 340667 Unused Value */
+                        //x=0;
+                        //y=0;
 			}
 			else
 			{
@@ -593,8 +937,9 @@ CosaMTAInitializeEthWanProvDhcpOption
                                     }
                                     return ANSC_STATUS_FAILURE;
                                 }
-                                x=0;
-                                y=0;
+                                /* Coverity  fix CID : 340667 Unused Value */
+                                //x=0;
+                                //y=0;
 				memset(pMtaProv->DhcpOption2171CccV6DssID1,0,MTA_DHCPOPTION122CCCV6DSSID1_MAX);
 			}
 
@@ -705,7 +1050,6 @@ CosaMTAInitializeEthWanProvDhcpOption
             }
                         /*Coverity Fix  CID:120996 RESOURCE_LEAK */
                         free(pMtaProv);
-			prepareToStartUdhcpc();
 			return ANSC_STATUS_SUCCESS;
 		}
 		else
@@ -966,10 +1310,10 @@ CosaMTAInitializeEthWanProv
  PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)hThisObject;
  pMyObject->pmtaprovinfo = (PCOSA_MTA_ETHWAN_PROV_INFO)AnscAllocateMemory(sizeof(COSA_MTA_ETHWAN_PROV_INFO));
 
- CosaMTAInitializeEthWanProvJournal(pMyObject->pmtaprovinfo);
-
-if(pMtaProv)
+/* Coverity Fix : NULL_RETURNS */
+if(pMtaProv && pMyObject->pmtaprovinfo)
 {
+    CosaMTAInitializeEthWanProvJournal(pMyObject->pmtaprovinfo);
 	/* CID  173808  Uninitialized scalar variable */
 	pMtaProv->MtaIPMode = MTA_IPV4;
 
@@ -1148,6 +1492,9 @@ if(pMtaProv)
             else
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
+                #if defined (SCXF10)
+                prepareToStartUdhcpc();
+                #endif
             }
                         /* Coverity Fix CID:74083 RESOURCE_LEAK */
                         free(pMtaProv);
@@ -1166,6 +1513,8 @@ else
 	{
 		printf("Memory Alloction Failed '%s'\n", __FUNCTION__);
 		CcspTraceError(("Memory Alloction Failed '%s'\n", __FUNCTION__));
+        if (pMtaProv) 
+            free(pMtaProv);
 		return ANSC_STATUS_FAILURE;
 	}  
 
