@@ -957,7 +957,7 @@ X_CISCO_COM_MTA_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         rc = strcpy_s(pValue, *pUlSize, Info.BootFileName);
-        CcspTraceInfo("[DEBUG] %s: BootFileName: %s, size: %zu\n", __FUNCTION__, Info.BootFileName, sizeof(Info.BootFileName));
+        CcspTraceInfo(("[DEBUG] %s: BootFileName: %s, size: %zu\n", __FUNCTION__, Info.BootFileName, sizeof(Info.BootFileName)));
         if (rc != EOK)
         {
             ERR_CHK(rc);
