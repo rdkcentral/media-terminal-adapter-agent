@@ -370,6 +370,8 @@ static bool drop_root()
 
 int main(int argc, char* argv[])
 {
+	CcspTraceInfo(("%s, Entering into main function \n", __FUNCTION__));
+	v_secure_system("print_uptime 'boot_to_MTALog_uptime'");
     int                             cmdChar            = 0;
     BOOL                            bRunAsDaemon       = TRUE;
     int                             idx                = 0;
