@@ -88,6 +88,13 @@
 
 static int sysevent_fd;
 static token_t sysevent_token;
+
+#if defined (SCXF10)
+typedef struct {
+    char cUdhcpcCmd[2048];
+    char cPidFilePath[256];
+} udhcpcMonitorArgs_t;
+#endif
 /**********************************************************************
 
     caller:     owner of the object
@@ -395,116 +402,122 @@ static int prepareDhcpOption60(const VoicePktcCapabilitiesType *pVoicePktCap,cha
 
     /* Subopt 1: pktcblVersion */
     cHexBuf[iIndex++] = 0x01;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->pktcblVersion);
     cHexBuf[iIndex++] = pVoicePktCap->pktcblVersion;
 
     /* Subopt 2: numEndpoints */
     cHexBuf[iIndex++] = 0x02;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->numEndpoints);
     cHexBuf[iIndex++] = pVoicePktCap->numEndpoints;
 
     /* Subopt 3: tgtSupport */
     cHexBuf[iIndex++] = 0x03;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->tgtSupport);
     cHexBuf[iIndex++] = pVoicePktCap->tgtSupport;
 
     /* Subopt 4: httpDownload */
     cHexBuf[iIndex++] = 0x04;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->httpDownload);
     cHexBuf[iIndex++] = pVoicePktCap->httpDownload;
 
     /* Subopt 9: nvramInfoStorage */
     cHexBuf[iIndex++] = 0x09;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->nvramInfoStorage);
     cHexBuf[iIndex++] = pVoicePktCap->nvramInfoStorage;
 
+    #if 0
     /* Subopt 11: supportedCodecs */
     cHexBuf[iIndex++] = 0x0b;
-    //cHexBuf[iIndex++] = 0x0b;  // Length = 11 bytes
-    cHexBuf[iIndex++] = 0x03;  // Length = 3 bytes
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->supportedCodecs);
+    memcpy(&cHexBuf[iIndex], pVoicePktCap->supportedCodecs, sizeof(pVoicePktCap->supportedCodecs));
+    iIndex += sizeof(pVoicePktCap->supportedCodecs);
+    #else
+    /* Subopt 11: supportedCodecs, As now hardcoded until we get the update from broadcom */
+    cHexBuf[iIndex++] = 0x0b;
+    cHexBuf[iIndex++] = 0x0b;  // Length = 11 bytes
     cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[0];
     cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[1];
     cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[2];
-     /*cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[3];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[4];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[5];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[6];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[7];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[8];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[9];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[10];*/
-
+    //Rest of the value is   1 01 01 09 04 00 01 01
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = 0x09;
+    cHexBuf[iIndex++] = 0x04;
+    cHexBuf[iIndex++] = 0x00;
+    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = 0x01;
+    #endif
     /* Subopt 12: silenceSuppression (mapped to subopt 0x0c) */
     cHexBuf[iIndex++] = 0x0c;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->silenceSuppression);
     cHexBuf[iIndex++] = pVoicePktCap->silenceSuppression;
 
     /* Subopt 13: echoCancellation (mapped to subopt 0x0d) */
     cHexBuf[iIndex++] = 0x0d;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->echoCancellation);
     cHexBuf[iIndex++] = pVoicePktCap->echoCancellation;
 
     /* Subopt 15: ugsAd (mapped to subopt 0x0f) */
     cHexBuf[iIndex++] = 0x0f;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->ugsAd);
     cHexBuf[iIndex++] = pVoicePktCap->ugsAd;
 
     /* Subopt 16: ifIndexStart (mapped to subopt 0x10) */
     cHexBuf[iIndex++] = 0x10;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->ifIndexStart);
     cHexBuf[iIndex++] = pVoicePktCap->ifIndexStart;
 
     /* Subopt 18: supportedProvFlow (mapped to subopt 0x12) */
     cHexBuf[iIndex++] = 0x12;
-    cHexBuf[iIndex++] = 0x02;  // Length = 2 bytes
-    cHexBuf[iIndex++] = 0x00;
-    cHexBuf[iIndex++] = pVoicePktCap->supportedProvFlow;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->supportedProvFlow);
+    cHexBuf[iIndex++] = (pVoicePktCap->supportedProvFlow >> 8) & 0xFF; // High byte
+    cHexBuf[iIndex++] = pVoicePktCap->supportedProvFlow & 0xFF; // Low byte
 
     /* Subopt 19: t38Version (mapped to subopt 0x13) */
     cHexBuf[iIndex++] = 0x13;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->t38Version);
     cHexBuf[iIndex++] = pVoicePktCap->t38Version;
 
     /* Subopt 20: t38ErrorCorrection (mapped to subopt 0x14) */
     cHexBuf[iIndex++] = 0x14;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->t38ErrorCorrection);
     cHexBuf[iIndex++] = pVoicePktCap->t38ErrorCorrection;
 
     /* Subopt 21: rfc2833 (mapped to subopt 0x15) */
     cHexBuf[iIndex++] = 0x15;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->rfc2833);
     cHexBuf[iIndex++] = pVoicePktCap->rfc2833;
 
     /* Subopt 22: voiceMetrics (mapped to subopt 0x16) */
     cHexBuf[iIndex++] = 0x16;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->voiceMetrics);
     cHexBuf[iIndex++] = pVoicePktCap->voiceMetrics;
 
     /* Subopt 23: supportedMibs (mapped to subopt 0x17) */
     cHexBuf[iIndex++] = 0x17;
-    cHexBuf[iIndex++] = 0x03;  // Length = 3 bytes
-    cHexBuf[iIndex++] = pVoicePktCap->supportedMibs[0];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedMibs[1];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedMibs[2];
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->supportedMibs);
+    memcpy(&cHexBuf[iIndex], pVoicePktCap->supportedMibs, sizeof(pVoicePktCap->supportedMibs));
+    iIndex += sizeof(pVoicePktCap->supportedMibs);
 
     /* Subopt 24: multiGrants (mapped to subopt 0x18) */
     cHexBuf[iIndex++] = 0x18;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->multiGrants);
     cHexBuf[iIndex++] = pVoicePktCap->multiGrants;
 
     /* Subopt 25: v_152 (mapped to subopt 0x19) */
     cHexBuf[iIndex++] = 0x19;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->v_152);
     cHexBuf[iIndex++] = pVoicePktCap->v_152;
 
     /* Subopt 26: certBootstrapping (mapped to subopt 0x1a) */
     cHexBuf[iIndex++] = 0x1a;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->certBootstrapping);
     cHexBuf[iIndex++] = pVoicePktCap->certBootstrapping;
 
     /* Subopt 38: ipAddrProvCap (mapped to subopt 0x26) */
     cHexBuf[iIndex++] = 0x26;
-    cHexBuf[iIndex++] = 0x01;
+    cHexBuf[iIndex++] = sizeof(pVoicePktCap->ipAddrProvCap);
     cHexBuf[iIndex++] = pVoicePktCap->ipAddrProvCap;
 
     int iWritten = snprintf(pOutbuf, iOutbufLen, "pktc2.0:");
@@ -622,68 +635,155 @@ static bool isXf10OrXer10Model(void)
     return false;
 }
 #endif
-static void prepareToStartUdhcpc(void)
-{
-    char cConfigMacVlanWithUdhcpc[8] = {0};
-    syscfg_get(NULL, "ConfigMacVlanWithUdhcpc", cConfigMacVlanWithUdhcpc, sizeof(cConfigMacVlanWithUdhcpc));
+// Check if process with given PID is running
+int isProcessRunning(pid_t pid) {
+    if (pid <= 0) return 0;
+    // kill with signal 0 checks if process exists
+    return (kill(pid, 0) == 0);
+}
 
-    if (cConfigMacVlanWithUdhcpc[0] == '\0' || strcmp(cConfigMacVlanWithUdhcpc, "true") != 0)
-    {
-        CcspTraceError(("%s:%d, ConfigMacVlanWithUdhcpc is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__));
+// Read PID from file
+pid_t readPidFile(const char *pPidFilePath) {
+    FILE *pFILE = fopen(pPidFilePath, "r");
+    if (!pFILE) return -1;
+
+    pid_t pid = -1;
+    fscanf(pFILE, "%d", &pid);
+    fclose(pFILE);
+    return pid;
+}
+
+// Check if udhcpc is already running
+int isUdhcpcRunning(const char *pPidFilePath) {
+    pid_t pid = readPidFile(pPidFilePath);
+    return isProcessRunning(pid);
+}
+void *udhcpcMonitorThread(void *arg)
+{
+    udhcpcMonitorArgs_t *pArgs = (udhcpcMonitorArgs_t *)arg;
+    if (pArgs == NULL) {
+        CcspTraceError(("%s: Invalid NULL pointer\n", __FUNCTION__));
+        return NULL;
+    }
+    pid_t pid = 0;
+    if(isUdhcpcRunning(pArgs->cPidFilePath)) {
+        CcspTraceInfo(("%s: udhcpc is already running with PID file %s\n", __FUNCTION__, pArgs->cPidFilePath));
+        pid = readPidFile(pArgs->cPidFilePath);
+
+        int iStatus = 0;
+        waitpid(pid, &iStatus, 0);
+
+        if (WIFEXITED(iStatus)) {
+            CcspTraceInfo(("%s: existing udhcpc exited with code %d, restarting\n", __FUNCTION__, WEXITSTATUS(iStatus)));
+        } else if (WIFSIGNALED(iStatus)) {
+            CcspTraceInfo(("%s: existing udhcpc killed by signal %d, restarting\n", __FUNCTION__, WTERMSIG(iStatus)));
+        }
+        sleep(2); // brief pause before restart
+    }
+    while (1) {
+        CcspTraceInfo(("%s: Starting udhcpc with command: %s\n", __FUNCTION__, pArgs->cUdhcpcCmd));
+        pid = fork();
+        if (pid == 0) {
+            // Child process
+            execl("/bin/sh", "sh", "-c", pArgs->cUdhcpcCmd, (char *)NULL);
+            // If execl returns, there was an error
+            CcspTraceError(("%s: execl failed: %s\n", __FUNCTION__, strerror(errno)));
+            _exit(127); // Exit child process
+        } else if (pid > 0) {
+            // Parent process
+            CcspTraceInfo(("%s: udhcpc started with PID %d\n", __FUNCTION__, pid));
+            int iStatus = 0;
+            waitpid(pid, &iStatus, 0);
+            if (WIFEXITED(iStatus)) {
+                CcspTraceInfo(("%s: udhcpc exited with code %d, restarting\n", __FUNCTION__, WEXITSTATUS(iStatus)));
+            } else if (WIFSIGNALED(iStatus)) {
+                CcspTraceInfo(("%s: udhcpc killed by signal %d, restarting\n", __FUNCTION__, WTERMSIG(iStatus)));
+            }
+            sleep(2); // brief pause before restart
+        } else {
+            // Fork failed
+            CcspTraceError(("%s: fork failed: %s\n", __FUNCTION__, strerror(errno)));
+            sleep(5); // wait before retrying
+        }
+    }
+    return NULL;
+}
+
+void startUdhcpcProcess(const char *pCmd, const char *pPidFilePath)
+{
+    if (pCmd == NULL || pPidFilePath == NULL) {
+        CcspTraceError(("%s: Invalid NULL pointer\n", __FUNCTION__));
         return;
     }
+    udhcpcMonitorArgs_t sUdhcpcMonitorArgs = {0};
+
+    snprintf(sUdhcpcMonitorArgs.cPidFilePath, sizeof(sUdhcpcMonitorArgs.cPidFilePath), "%s", pPidFilePath);
+    snprintf(sUdhcpcMonitorArgs.cUdhcpcCmd, sizeof(sUdhcpcMonitorArgs.cUdhcpcCmd), "%s", pCmd);
+    pthread_t threadId;
+    if (pthread_create(&threadId, NULL, udhcpcMonitorThread, (void *)&sUdhcpcMonitorArgs) != 0) {
+        CcspTraceError(("%s: Failed to create udhcpc monitor thread\n", __FUNCTION__));
+        return;
+    }
+    pthread_detach(threadId);
+}
+static void createMtaInterface(void)
+{
+    char cMtaIfaceEnabled[8] = {0};
+    char cMtaInterfaceName[32] = {0};
+    char cMtaInterfaceMac[32] = {0};
+    char cWanIfname[32] = {0};
+    syscfg_get(NULL, "VoiceMtaIface_Enabled", cMtaIfaceEnabled, sizeof(cMtaIfaceEnabled));
+    syscfg_get(NULL, "mtaIface", cMtaInterfaceName, sizeof(cMtaInterfaceName));
+
+    if (cMtaIfaceEnabled[0] == '\0' || strcmp(cMtaIfaceEnabled, "true") != 0) {
+        CcspTraceError(("%s:%d, VoiceMtaIface_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
+        return;
+    }
+    if (cMtaInterfaceName[0] == '\0') {
+        CcspTraceError(("%s:%d, mtaIface not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
+        strcpy_s(cMtaInterfaceName, sizeof(cMtaInterfaceName), "mta0");
+    }
+    //Read the mac address from platform_hal_GetMTAMacAddress API once it is implemented
+    readMacAddress(cMtaInterfaceMac);
+    if (strlen(cMtaInterfaceMac) == 0 || cMtaInterfaceMac[0] == '\0') {
+        CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
+        return;
+    }
+    CcspTraceError(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceMac));
+    syscfg_get(NULL, "wan_physical_ifname", cWanIfname, sizeof(cWanIfname));
+    CcspTraceInfo(("%s:%d, WAN Physical Ifname is %s\n", __FUNCTION__, __LINE__, cWanIfname));
+    if (cWanIfname[0] == '\0')
+        strcpy_s(cWanIfname, sizeof(cWanIfname), "erouter0");
+
+    //Create the macVlan
+    CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cMtaInterfaceMac));
+    char cCmd[2048] = {0};
+    snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, cMtaInterfaceName);
+    system(cCmd);
+    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", cMtaInterfaceName, cMtaInterfaceMac);
+    system(cCmd);
+    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", cMtaInterfaceName);
+    system(cCmd);
+    CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName));
+
     char cDhcpOption43[512] = {0};
     char cDhcpOption60[512] = {0};
     CcspTraceInfo(("%s:%d, Reading DHCP Options from HAL\n", __FUNCTION__, __LINE__));
     readDhcpOptionsFromHal(cDhcpOption43, sizeof(cDhcpOption43), cDhcpOption60, sizeof(cDhcpOption60));
 
-    if ((cDhcpOption43[0] != '\0') || (cDhcpOption60[0] != '\0'))
-    {
-        //read mtaInterfaceName from syscfg and macVlan interface mac (EMTA 78:B3:9F:8F:F2:25) from /tmp/factory_nvram.data and create the macVlan interface using ip link add command
-        char cMtaInterfaceName[32] = {0};
-        syscfg_get(NULL, "mtaInterfaceName", cMtaInterfaceName, sizeof(cMtaInterfaceName));
-        if (cMtaInterfaceName[0] == '\0')
-        {
-            strcpy_s(cMtaInterfaceName, sizeof(cMtaInterfaceName), "voipIfname");
-        }
-        CcspTraceError(("%s:%d, MTA Interface Name is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName));
-        char cMacVlanMac[32] = {0};
-        readMacAddress(cMacVlanMac);
-        if (strlen(cMacVlanMac) == 0)
-        {
-            CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
-            snprintf(cMacVlanMac, sizeof(cMacVlanMac), "78:B3:9F:8F:F2:25");
-        }
-        CcspTraceError(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMacVlanMac));
-        if (cMacVlanMac[0] != '\0')
-        {
-            char cWanIfname[32] = {0};
-            syscfg_get(NULL, "wan_physical_ifname", cWanIfname, sizeof(cWanIfname));
-            CcspTraceInfo(("%s:%d, WAN Physical Ifname is %s\n", __FUNCTION__, __LINE__, cWanIfname));
-            if (cWanIfname[0] == '\0')
-            {
-                strcpy_s(cWanIfname, sizeof(cWanIfname), "erouter0");
-            }
-            //Create the macVlan
-            CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cMacVlanMac));
-            char cCmd[2048] = {0};
-            snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, cMtaInterfaceName);
-            system(cCmd);
-            snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", cMtaInterfaceName, cMacVlanMac);
-            system(cCmd);
-            snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", cMtaInterfaceName);
-            system(cCmd);
-            //Now run the udhcpc with dhcp option 43 and 125 like below
-            //udhcpc -O 23 -O 125 -i mtaIface -p /tmp/udhcpc.mtaIface.pid -x 0x7D:00000DE90101020201020301000401000901010B0306090F0C01010D01010F010110010912020004130101140101150101160101170302003F1801001901001A0100260101 -s /var/tmp/service_udhcpc
-            snprintf(cCmd, sizeof(cCmd), "udhcpc -O 2 -O 122 -O 4 -O 7 -O 43 -O 54 -O 99 -O 123 -O 125 -O timezone -V eRouter1.0 -x %s -i %s -p /tmp/udhcpc.%s.pid -V %s -s /var/tmp/service_udhcpc &", cDhcpOption43, cMtaInterfaceName, cMtaInterfaceName, cDhcpOption60);
-            system(cCmd);
-            CcspTraceInfo(("%s:%d, Started udhcpc for MTA on interface %s with cmd: %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cCmd));
-        }
-        else
-        {
-            CcspTraceWarning(("%s:%d, mtaMacAddress not found in /tmp/factory_nvram.data\n", __FUNCTION__, __LINE__));
-        }
+    if ((cDhcpOption43[0] == '\0') || (cDhcpOption60[0] == '\0')) {
+        CcspTraceError(("%s:%d, DHCP Options read from HAL are invalid, skipping udhcpc start\n", __FUNCTION__, __LINE__));
+        return;
     }
+
+    //Now run the udhcpc with dhcp option 43 and 125 like below
+    //udhcpc -O 23 -O 125 -i mtaIface -p /tmp/udhcpc.mtaIface.pid -x 0x7D:00000DE90101020201020301000401000901010B0306090F0C01010D01010F010110010912020004130101140101150101160101170302003F1801001901001A0100260101 -s /var/tmp/service_udhcpc
+    snprintf(cCmd, sizeof(cCmd), "udhcpc -O 2 -O 122 -O 4 -O 7 -O 43 -O 54 -O 99 -O 123 -O 125 -O timezone -V eRouter1.0 -x %s -i %s -p /tmp/udhcpc.%s.pid -V %s -s /var/tmp/service_udhcpc &", cDhcpOption43, cMtaInterfaceName, cMtaInterfaceName, cDhcpOption60);
+    char cPidFilePath[64] = {0};
+    snprintf(cPidFilePath, sizeof(cPidFilePath), "/tmp/udhcpc.%s.pid", cMtaInterfaceName);
+    startUdhcpcProcess(cCmd, cPidFilePath);
+    //system(cCmd);
+    //CcspTraceInfo(("%s:%d, Started udhcpc for MTA on interface %s with cmd: %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cCmd));
 }
 #endif
 ANSC_STATUS
@@ -1492,9 +1592,6 @@ if(pMtaProv && pMyObject->pmtaprovinfo)
             else
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
-                #if defined (SCXF10)
-                prepareToStartUdhcpc();
-                #endif
             }
                         /* Coverity Fix CID:74083 RESOURCE_LEAK */
                         free(pMtaProv);
@@ -1817,6 +1914,10 @@ void * Mta_Sysevent_thread(void *  hThisObject)
                 CcspTraceWarning(("%s current_wan_state up, Initializing MTA \n",__FUNCTION__));
       	        CosaMTAInitializeEthWanProv(pMyObject);
              }
+             #if defined (SCXF10)
+             CcspTraceWarning(("%s current_wan_state up, Initializing MTA Inteface \n",__FUNCTION__));
+             createMtaInterface();
+             #endif
          }
 #endif
 
