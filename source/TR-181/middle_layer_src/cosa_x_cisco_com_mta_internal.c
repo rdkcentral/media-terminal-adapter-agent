@@ -619,8 +619,7 @@ int getMaxCount()
 	if ( MTA_DHCP_ENABLED == checkIfDefMtaDhcpOptionEnabled() )
 	{
 		CcspTraceInfo(("%s dhcp_option's enabled in partner defaults,wait for 60sec to receive dhcp options  \n",__FUNCTION__));
-		//maxCount=MAX_TIMEOUT_MTA_DHCP_ENABLED ;
-		maxCount=0;
+		maxCount=MAX_TIMEOUT_MTA_DHCP_ENABLED ;
 	}
 	return maxCount;
 }
@@ -649,7 +648,7 @@ void WaitForDhcpOption()
 			CcspTraceInfo(("%s dhcp_option's received,breaking the loop  \n",__FUNCTION__));
 			break;
 		}
-		//sleep(5);
+		sleep(5);
 		count+=5;
  	}
 	APPLY_PRINT("%s Didn't receive dhcp options in %d sec, initializing mta with default values \n",__FUNCTION__,maxCount);
