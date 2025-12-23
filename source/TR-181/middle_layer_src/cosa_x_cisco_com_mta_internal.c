@@ -91,8 +91,9 @@ static token_t sysevent_token;
 
 #if defined (SCXF10)
 typedef struct {
-    char cUdhcpcCmd[2048];
-    char cPidFilePath[256];
+    char cIfName[64];
+    char cDhcpOption43[512];
+    char cDhcpOption60[512];
 } udhcpcMonitorArgs_t;
 #endif
 /**********************************************************************
@@ -635,100 +636,112 @@ static bool isXf10OrXer10Model(void)
     return false;
 }
 #endif
-// Check if process with given PID is running
-int isProcessRunning(pid_t pid) {
-    if (pid <= 0) return 0;
-    // kill with signal 0 checks if process exists
-    return (kill(pid, 0) == 0);
-}
 
-// Read PID from file
-pid_t readPidFile(const char *pPidFilePath) {
-    FILE *pFILE = fopen(pPidFilePath, "r");
-    if (!pFILE) return -1;
-
-    pid_t pid = -1;
-    fscanf(pFILE, "%d", &pid);
-    fclose(pFILE);
-    return pid;
-}
-
-// Check if udhcpc is already running
-int isUdhcpcRunning(const char *pPidFilePath) {
-    pid_t pid = readPidFile(pPidFilePath);
-    return isProcessRunning(pid);
-}
 void *udhcpcMonitorThread(void *arg)
 {
     udhcpcMonitorArgs_t *pArgs = (udhcpcMonitorArgs_t *)arg;
     if (pArgs == NULL) {
-        CcspTraceError(("%s: Invalid NULL pointer\n", __FUNCTION__));
+        CcspTraceError(("%s-%d: Invalid NULL pointer\n", __FUNCTION__, __LINE__));
         return NULL;
     }
-    pid_t pid = 0;
-    if(isUdhcpcRunning(pArgs->cPidFilePath)) {
-        CcspTraceInfo(("%s: udhcpc is already running with PID file %s\n", __FUNCTION__, pArgs->cPidFilePath));
-        pid = readPidFile(pArgs->cPidFilePath);
 
-        int iStatus = 0;
-        waitpid(pid, &iStatus, 0);
+    char cPidFilePath[128] = {0};
+    snprintf(cPidFilePath, sizeof(cPidFilePath), "/tmp/udhcpc_%s.pid", pArgs->cIfName);
 
-        if (WIFEXITED(iStatus)) {
-            CcspTraceInfo(("%s: existing udhcpc exited with code %d, restarting\n", __FUNCTION__, WEXITSTATUS(iStatus)));
-        } else if (WIFSIGNALED(iStatus)) {
-            CcspTraceInfo(("%s: existing udhcpc killed by signal %d, restarting\n", __FUNCTION__, WTERMSIG(iStatus)));
-        }
-        sleep(2); // brief pause before restart
-    }
+    char *argv[] = {
+        "udhcpc",
+        "-f",  // Run in foreground
+        "-O", "2",
+        "-O", "122",
+        "-O", "4",
+        "-O", "7",
+        "-O", "43",
+        "-O", "54",
+        "-O", "99",
+        "-O", "123",
+        "-O", "125",
+        "-O", "timezone",
+        "-V", "eRouter1.0",
+        "-x", pArgs->cDhcpOption43,
+        "-i", pArgs->cIfName,
+        "-p", cPidFilePath,
+        "-V", pArgs->cDhcpOption60,
+        "-s", "/usr/bin/service_udhcpc",
+        NULL
+    };
+
+    // Main monitoring loop
     while (1) {
-        CcspTraceInfo(("%s: Starting udhcpc with command: %s\n", __FUNCTION__, pArgs->cUdhcpcCmd));
-        pid = fork();
+        CcspTraceInfo(("%s-%d: Starting udhcpc on interface %s\n",
+               __FUNCTION__, __LINE__, pArgs->cIfName));
+
+        pid_t pid = fork();
         if (pid == 0) {
-            // Child process
-            execl("/bin/sh", "sh", "-c", pArgs->cUdhcpcCmd, (char *)NULL);
-            // If execl returns, there was an error
-            CcspTraceError(("%s: execl failed: %s\n", __FUNCTION__, strerror(errno)));
-            _exit(127); // Exit child process
+            // Child process - execute udhcpc
+            execvp("udhcpc", argv);
+
+            // If we reach here, execvp failed
+            CcspTraceError(("%s-%d: execvp failed: %s\n",
+                   __FUNCTION__, __LINE__, strerror(errno)));
+            _exit(127);
         } else if (pid > 0) {
-            // Parent process
-            CcspTraceInfo(("%s: udhcpc started with PID %d\n", __FUNCTION__, pid));
-            int iStatus = 0;
-            waitpid(pid, &iStatus, 0);
-            if (WIFEXITED(iStatus)) {
-                CcspTraceInfo(("%s: udhcpc exited with code %d, restarting\n", __FUNCTION__, WEXITSTATUS(iStatus)));
-            } else if (WIFSIGNALED(iStatus)) {
-                CcspTraceInfo(("%s: udhcpc killed by signal %d, restarting\n", __FUNCTION__, WTERMSIG(iStatus)));
+            // Parent - wait for child to exit
+            int status;
+            CcspTraceInfo(("%s-%d: Started udhcpc with PID %d, monitoring\n",
+                   __FUNCTION__, __LINE__, pid));
+            waitpid(pid, &status, 0);  // Block until udhcpc exits
+            // udhcpc exited - log and restart
+            if (WIFEXITED(status)) {
+                CcspTraceWarning(("%s-%d: udhcpc exited with status %d, restarting in 2 seconds\n",
+                       __FUNCTION__, __LINE__, WEXITSTATUS(status)));
+            } else if (WIFSIGNALED(status)) {
+                CcspTraceWarning(("%s-%d: udhcpc killed by signal %d, restarting in 2 seconds\n",
+                       __FUNCTION__, __LINE__, WTERMSIG(status)));
             }
-            sleep(2); // brief pause before restart
+            
+            sleep(2);  // Wait before restarting
+
         } else {
             // Fork failed
-            CcspTraceError(("%s: fork failed: %s\n", __FUNCTION__, strerror(errno)));
-            sleep(5); // wait before retrying
+            CcspTraceError(("%s-%d: fork failed: %s, retrying in 5 seconds\n",
+                   __FUNCTION__, __LINE__, strerror(errno)));
+            sleep(5);
         }
     }
     return NULL;
 }
 
-void startUdhcpcProcess(const char *pCmd, const char *pPidFilePath)
+
+void startUdhcpcProcess(char *pMtaInterfaceName, char *pDhcpOption43, char *pDhcpOption60)
 {
-    if (pCmd == NULL || pPidFilePath == NULL) {
-        CcspTraceError(("%s: Invalid NULL pointer\n", __FUNCTION__));
+    if (pMtaInterfaceName == NULL || pDhcpOption43 == NULL || pDhcpOption60 == NULL) {
+        CcspTraceError(("%s-%d, Invalid NULL pointer\n", __FUNCTION__, __LINE__ ));
         return;
     }
-    udhcpcMonitorArgs_t sUdhcpcMonitorArgs = {0};
 
-    snprintf(sUdhcpcMonitorArgs.cPidFilePath, sizeof(sUdhcpcMonitorArgs.cPidFilePath), "%s", pPidFilePath);
-    snprintf(sUdhcpcMonitorArgs.cUdhcpcCmd, sizeof(sUdhcpcMonitorArgs.cUdhcpcCmd), "%s", pCmd);
+    // Allocate args on heap so they persist after function returns
+    static udhcpcMonitorArgs_t sUdhcpcMonitorArgs = {0};
+
+    snprintf(sUdhcpcMonitorArgs.cIfName, sizeof(sUdhcpcMonitorArgs.cIfName),
+             "%s", pMtaInterfaceName);
+    snprintf(sUdhcpcMonitorArgs.cDhcpOption43, sizeof(sUdhcpcMonitorArgs.cDhcpOption43),
+             "%s", pDhcpOption43);
+    snprintf(sUdhcpcMonitorArgs.cDhcpOption60, sizeof(sUdhcpcMonitorArgs.cDhcpOption60),
+             "%s", pDhcpOption60);
+
     pthread_t threadId;
-    if (pthread_create(&threadId, NULL, udhcpcMonitorThread, (void *)&sUdhcpcMonitorArgs) != 0) {
-        CcspTraceError(("%s: Failed to create udhcpc monitor thread\n", __FUNCTION__));
+    if (pthread_create(&threadId, NULL, udhcpcMonitorThread, 
+                       (void *)&sUdhcpcMonitorArgs) != 0) {
+        CcspTraceError(("%s-%d, Failed to create udhcpc monitor thread\n", __FUNCTION__, __LINE__));
         return;
     }
     pthread_detach(threadId);
+    CcspTraceInfo(("%s-%d, udhcpc monitor thread created successfully\n", __FUNCTION__, __LINE__));
 }
 static void createMtaInterface(void)
 {
     char cMtaIfaceEnabled[8] = {0};
+    char cMtaIfaceDhcpV4Enabled[8] = {0};
     char cMtaInterfaceName[32] = {0};
     char cMtaInterfaceMac[32] = {0};
     char cWanIfname[32] = {0};
@@ -776,14 +789,13 @@ static void createMtaInterface(void)
         return;
     }
 
-    //Now run the udhcpc with dhcp option 43 and 125 like below
-    //udhcpc -O 23 -O 125 -i mtaIface -p /tmp/udhcpc.mtaIface.pid -x 0x7D:00000DE90101020201020301000401000901010B0306090F0C01010D01010F010110010912020004130101140101150101160101170302003F1801001901001A0100260101 -s /var/tmp/service_udhcpc
-    snprintf(cCmd, sizeof(cCmd), "udhcpc -O 2 -O 122 -O 4 -O 7 -O 43 -O 54 -O 99 -O 123 -O 125 -O timezone -V eRouter1.0 -x %s -i %s -p /tmp/udhcpc.%s.pid -V %s -s /var/tmp/service_udhcpc &", cDhcpOption43, cMtaInterfaceName, cMtaInterfaceName, cDhcpOption60);
-    char cPidFilePath[64] = {0};
-    snprintf(cPidFilePath, sizeof(cPidFilePath), "/tmp/udhcpc.%s.pid", cMtaInterfaceName);
-    startUdhcpcProcess(cCmd, cPidFilePath);
-    //system(cCmd);
-    //CcspTraceInfo(("%s:%d, Started udhcpc for MTA on interface %s with cmd: %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cCmd));
+    syscfg_get(NULL, "VoiceMtaIface_DhcpV4Enabled",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
+    if (0 == strcmp(cMtaIfaceDhcpV4Enabled, "true")) {
+        CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName));
+        startUdhcpcProcess(cMtaInterfaceName, cDhcpOption43, cDhcpOption60);
+    } else {
+        CcspTraceInfo(("%s:%d, VoiceMtaIface_DhcpV4Enabled is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__));
+    }
 }
 #endif
 ANSC_STATUS
