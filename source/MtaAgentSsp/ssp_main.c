@@ -405,6 +405,8 @@ int main(int argc, char* argv[])
     /* Set the global pComponentName */
     pComponentName = gpPnmStartCfg->ComponentName;
 
+	v_secure_system("print_uptime 'boot_to_MTA_init'");
+	CcspTraceInfo(("MTA Agent initialization starts here \n"));
 #if defined(_DEBUG) && defined(_COSA_SIM_)
     AnscSetTraceLevel(CCSP_TRACE_LEVEL_INFO);
 #endif
