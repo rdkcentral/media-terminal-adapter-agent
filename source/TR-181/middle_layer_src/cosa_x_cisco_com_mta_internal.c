@@ -80,6 +80,7 @@
 #include "voice_dhcp_hal.h"
 #include "ccsp/autoconf.h"
 #include "ccsp/platform_hal.h"
+#include "ipc_mtaVoice_msg.h"
 
 #define MAX_BUFF_SIZE 128
 #define MAX_IP_PREF_VAL 6
@@ -1993,6 +1994,125 @@ void * Mta_Sysevent_thread(void *  hThisObject)
 
 }
 
+void voiceDhcpV4Update(ipcMtaVoiceDhcpv4Data_t *pDhcpV4Data)
+{
+    if (NULL == pDhcpV4Data)
+    {
+        CcspTraceError(("%s: Invalid DHCPv4 data pointer!\n", __FUNCTION__));
+        return;
+    }
+    CcspTraceInfo(("%s: DHCPv4 State Changed \n", __FUNCTION__));
+    CcspTraceInfo(("%s: IP Address Assigned=%d \n", __FUNCTION__, pDhcpV4Data->bIsAddrAssigned));
+    CcspTraceInfo(("%s: IP Address Expired=%d \n", __FUNCTION__, pDhcpV4Data->bIsIpExpired));
+
+    CcspTraceInfo(("%s: Lease Time=%d \n", __FUNCTION__, pDhcpV4Data->ui32LeaseTime));
+    CcspTraceInfo(("%s: Rebinding Time=%d \n", __FUNCTION__, pDhcpV4Data->ui32RebindingTime));
+    CcspTraceInfo(("%s: Renewal Time=%d \n", __FUNCTION__, pDhcpV4Data->ui32RenewalTime));
+    CcspTraceInfo(("%s: Time Offset=%d \n", __FUNCTION__, pDhcpV4Data->i32TimeOffset));
+
+    CcspTraceInfo(("%s: Dhcp Interface=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpcInterface));
+    CcspTraceInfo(("%s: IP Address=%s \n", __FUNCTION__, pDhcpV4Data->cIp));
+    CcspTraceInfo(("%s: Bootfile Name=%s \n", __FUNCTION__, pDhcpV4Data->cBootfileName));
+    CcspTraceInfo(("%s: Dhcp Server Name=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpServerName));
+    CcspTraceInfo(("%s: Dhcp Server Id=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpServerId));
+    CcspTraceInfo(("%s: Dhcp Server IP=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpServerIp));
+    CcspTraceInfo(("%s: Netmask=%s \n", __FUNCTION__, pDhcpV4Data->cMask));
+    CcspTraceInfo(("%s: Router IP=%s \n", __FUNCTION__, pDhcpV4Data->cRouterIp));
+    CcspTraceInfo(("%s: DNS Server 1=%s \n", __FUNCTION__, pDhcpV4Data->cDnsServer));
+    CcspTraceInfo(("%s: DNS Server 2=%s \n", __FUNCTION__, pDhcpV4Data->cDnsServer1));
+    CcspTraceInfo(("%s: Log Server=%s \n", __FUNCTION__, pDhcpV4Data->cLogServer));
+    CcspTraceInfo(("%s: Domain Name=%s \n", __FUNCTION__, pDhcpV4Data->cDomainName));
+    CcspTraceInfo(("%s: Host Name=%s \n", __FUNCTION__, pDhcpV4Data->cHostName));
+    CcspTraceInfo(("%s: Time Server=%s \n", __FUNCTION__, pDhcpV4Data->cTimeServer));
+    CcspTraceInfo(("%s: Option 122=%s \n", __FUNCTION__, pDhcpV4Data->cOption122));
+    CcspTraceInfo(("%s: Broadcast IP=%s \n", __FUNCTION__, pDhcpV4Data->cBroadcastIp));
+    CcspTraceInfo(("%s: Time Zone=%s \n", __FUNCTION__, pDhcpV4Data->cTimeZone));
+    CcspTraceInfo(("%s: TFTP Address=%s \n", __FUNCTION__, pDhcpV4Data->cTftpAddr));
+
+}
+static void *MtaIpcServerThread(void *arg)
+{
+    UNREFERENCED_PARAMETER(arg);
+    pthread_detach(pthread_self());
+
+    int iIpcListienFd = -1;
+
+    while (1)
+    {
+        CcspTraceInfo(("%s-%d: Creating the Nano socket and bind/listen...\n", __FUNCTION__, __LINE__));
+        iIpcListienFd = nn_socket(AF_SP, NN_PULL);
+        if ( iIpcListienFd < 0 )
+        {
+            CcspTraceError(("%s: Failed to create the Nano socket[%s]!\n", __FUNCTION__, strerror(errno)));
+            return NULL;
+        }
+        if (nn_bind(iIpcListienFd, MTA_AGENT_ADDR) < 0)
+        {
+            CcspTraceError(("%s: Failed to bind the Nano socket[%s] to %s!\n", __FUNCTION__, strerror(errno), MTA_AGENT_ADDR));
+            nn_close(iIpcListienFd);
+            sleep(5);
+            continue;
+        }
+        else
+        {
+            CcspTraceInfo(("%s: Nano socket created and bound to %s successfully!\n", __FUNCTION__, MTA_AGENT_ADDR));
+            break;
+        }
+    }
+
+    int iRecvBytes = 0;
+    int iMsgSize = sizeof(ipcMtaVoiceData_t);
+    ipcMtaVoiceData_t sRecvVoiceData;
+    memset(&sRecvVoiceData, 0, sizeof(ipcMtaVoiceData_t));
+
+    while(1)
+    {
+        iRecvBytes = nn_recv(iIpcListienFd, &sRecvVoiceData, iMsgSize, 0);
+        if (iRecvBytes == iMsgSize)
+        {
+            CcspTraceInfo(("%s: Received IPC message, Type=%d!\n", __FUNCTION__, sRecvVoiceData.eMsgType));
+
+            switch (sRecvVoiceData.eMsgType)
+            {
+                case DHCPv4_STATE_CHANGED:
+                    voiceDhcpV4Update(&(sRecvVoiceData.data.sVoiceDhcpv4));
+                    break;
+
+                default:
+                    CcspTraceError(("%s: Unknown IPC message type=%d received!\n", __FUNCTION__, sRecvVoiceData.eMsgType));
+                    break;
+            }
+        }
+        else
+        {
+            CcspTraceError(("%s: Failed to receive complete IPC message, recvBytes=%d!\n", __FUNCTION__, iRecvBytes));
+        }
+    }
+
+    pthread_exit(NULL);
+    return NULL;
+}
+
+ANSC_STATUS mtaAgent_StartIpcServer(void)
+{
+    pthread_t ipcThreadId;
+    ANSC_STATUS   returnStatus = ANSC_STATUS_FAILURE;
+    int iRet = -1;
+
+    iRet = pthread_create(&ipcThreadId, NULL, &MtaIpcServerThread, NULL);
+    if ( iRet != 0 )
+    {
+        CcspTraceError(("%s: Failed to create MTA IPC server thread!\n", __FUNCTION__));
+        return returnStatus;
+    }
+    else
+    {
+        CcspTraceInfo(("%s: MTA IPC server thread created successfully!\n", __FUNCTION__));
+        returnStatus = ANSC_STATUS_SUCCESS;
+    }
+
+    return returnStatus;
+}
 
 /**********************************************************************
 
@@ -2045,6 +2165,8 @@ CosaMTAInitialize
 
 #endif
     CosaMTALineTableInitialize(hThisObject);
+
+    mtaAgent_StartIpcServer();
     return returnStatus;
 }
 
