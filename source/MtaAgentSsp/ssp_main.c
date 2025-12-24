@@ -407,9 +407,9 @@ int main(int argc, char* argv[])
 
 	//v_secure_system("print_uptime 'boot_to_MTA_init'");
 	
-int rc = v_secure_system("/usr/bin/print_uptime 'boot_to_MTA_init'");
-if (rc != 0) {
-    CcspTraceWarning(("print_uptime failed, rc=%d\n", rc));
+int ret_val = v_secure_system("/usr/bin/print_uptime 'boot_to_MTA_init'");
+if (ret_val != 0) {
+    CcspTraceWarning(("print_uptime failed, ret=%d\n", ret_val));
 }
 
 	CcspTraceInfo(("MTA Agent initialization starts here \n"));
