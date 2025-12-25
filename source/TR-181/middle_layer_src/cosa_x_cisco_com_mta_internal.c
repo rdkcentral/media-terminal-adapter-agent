@@ -91,6 +91,8 @@ static int sysevent_fd;
 static token_t sysevent_token;
 
 #if defined (SCXF10)
+#define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
+#define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
 typedef struct {
     char cIfName[64];
     char cDhcpOption43[512];
@@ -741,21 +743,21 @@ void startUdhcpcProcess(char *pMtaInterfaceName, char *pDhcpOption43, char *pDhc
 }
 static void createMtaInterface(void)
 {
-    char cMtaIfaceEnabled[8] = {0};
-    char cMtaIfaceDhcpV4Enabled[8] = {0};
-    char cMtaInterfaceName[32] = {0};
+    char cVoiceSupportEnabled[8] = {0};
+    char cMtaIfaceDhcpV4Enabled[32] = {0};
+    char cVoiceSupportIfaceName[32] = {0};
     char cMtaInterfaceMac[32] = {0};
     char cWanIfname[32] = {0};
-    syscfg_get(NULL, "VoiceMtaIface_Enabled", cMtaIfaceEnabled, sizeof(cMtaIfaceEnabled));
-    syscfg_get(NULL, "mtaIface", cMtaInterfaceName, sizeof(cMtaInterfaceName));
+    syscfg_get(NULL, "VoiceSupport_Enabled", cVoiceSupportEnabled, sizeof(cVoiceSupportEnabled));
+    syscfg_get(NULL, "VoiceSupport_IfaceName", cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
 
-    if (cMtaIfaceEnabled[0] == '\0' || strcmp(cMtaIfaceEnabled, "true") != 0) {
-        CcspTraceError(("%s:%d, VoiceMtaIface_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
+    if (cVoiceSupportEnabled[0] == '\0' || strcmp(cVoiceSupportEnabled, "true") != 0) {
+        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
         return;
     }
-    if (cMtaInterfaceName[0] == '\0') {
+    if (cVoiceSupportIfaceName[0] == '\0') {
         CcspTraceError(("%s:%d, mtaIface not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
-        strcpy_s(cMtaInterfaceName, sizeof(cMtaInterfaceName), "mta0");
+        strcpy_s(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "mta0");
     }
     //Read the mac address from platform_hal_GetMTAMacAddress API once it is implemented
     readMacAddress(cMtaInterfaceMac);
@@ -770,15 +772,15 @@ static void createMtaInterface(void)
         strcpy_s(cWanIfname, sizeof(cWanIfname), "erouter0");
 
     //Create the macVlan
-    CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName, cMtaInterfaceMac));
+    CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName, cMtaInterfaceMac));
     char cCmd[2048] = {0};
-    snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, cMtaInterfaceName);
+    snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, cVoiceSupportIfaceName);
     system(cCmd);
-    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", cMtaInterfaceName, cMtaInterfaceMac);
+    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", cVoiceSupportIfaceName, cMtaInterfaceMac);
     system(cCmd);
-    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", cMtaInterfaceName);
+    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", cVoiceSupportIfaceName);
     system(cCmd);
-    CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName));
+    CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
 
     char cDhcpOption43[512] = {0};
     char cDhcpOption60[512] = {0};
@@ -790,12 +792,12 @@ static void createMtaInterface(void)
         return;
     }
 
-    syscfg_get(NULL, "VoiceMtaIface_DhcpV4Enabled",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
-    if (0 == strcmp(cMtaIfaceDhcpV4Enabled, "true")) {
-        CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cMtaInterfaceName));
-        startUdhcpcProcess(cMtaInterfaceName, cDhcpOption43, cDhcpOption60);
+    syscfg_get(NULL, "VoiceSupport_Mode",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
+    if (0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_DUAL_STACK)) {
+        CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
+        startUdhcpcProcess(cVoiceSupportIfaceName, cDhcpOption43, cDhcpOption60);
     } else {
-        CcspTraceInfo(("%s:%d, VoiceMtaIface_DhcpV4Enabled is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__));
+        CcspTraceInfo(("%s:%d, VoiceMtaIface_DhcpV4Enabled :%s, is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__, cMtaIfaceDhcpV4Enabled));
     }
 }
 #endif
