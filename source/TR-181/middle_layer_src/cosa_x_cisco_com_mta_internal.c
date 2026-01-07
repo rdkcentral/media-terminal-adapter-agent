@@ -77,10 +77,9 @@
 #include "mta_hal.h"
 #include <sysevent/sysevent.h>
 #include "syscfg/syscfg.h"
-#include "voice_dhcp_hal.h"
-#include "ccsp/autoconf.h"
-#include "ccsp/platform_hal.h"
-#include "ipc_mtaVoice_msg.h"
+#if defined (SCXF10)
+#include "cosa_rbus_apis.h"
+#endif
 
 #define MAX_BUFF_SIZE 128
 #define MAX_IP_PREF_VAL 6
@@ -93,11 +92,6 @@ static token_t sysevent_token;
 #if defined (SCXF10)
 #define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
 #define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
-typedef struct {
-    char cIfName[64];
-    char cDhcpOption43[512];
-    char cDhcpOption60[512];
-} udhcpcMonitorArgs_t;
 #endif
 /**********************************************************************
 
@@ -215,532 +209,6 @@ static void readMacAddress (char * pMacAddress)
     }
 }
 
-static void getDhcpOption43RawData (dhcpOption43RawData_t * pDhcpOption43RawData)
-{
-    if (NULL == pDhcpOption43RawData)
-    {
-        CcspTraceError(("%s: Invalid NULL pointer\n", __FUNCTION__));
-        return;
-    }
-
-    snprintf(pDhcpOption43RawData->cVendorName, sizeof(pDhcpOption43RawData->cVendorName), CONFIG_VENDOR_NAME);
-    snprintf(pDhcpOption43RawData->cOUID,sizeof(pDhcpOption43RawData->cOUID), CONFIG_VENDOR_ID);
-    if (RETURN_OK != platform_hal_GetModelName(pDhcpOption43RawData->cModelNumber))
-        CcspTraceError(("%s: platform_hal_GetModelName failed\n", __FUNCTION__));
-    if (RETURN_OK != platform_hal_GetSerialNumber(pDhcpOption43RawData->cSerialNumber))
-        CcspTraceError(("%s: platform_hal_GetSerialNumber failed\n", __FUNCTION__));
-    if (RETURN_OK != platform_hal_GetHardwareVersion(pDhcpOption43RawData->cHardwareVersion))
-        CcspTraceError(("%s: platform_hal_GetHardwareVersion failed\n", __FUNCTION__));
-    if (RETURN_OK != platform_hal_GetFirmwareName(pDhcpOption43RawData->cSoftwareVersion, sizeof(pDhcpOption43RawData->cSoftwareVersion)))
-        CcspTraceError(("%s: platform_hal_GetFirmwareName failed\n", __FUNCTION__));
-    if (RETURN_OK != platform_hal_GetBootloaderVersion(pDhcpOption43RawData->cBootLoaderVersion, sizeof(pDhcpOption43RawData->cBootLoaderVersion)))
-        CcspTraceError(("%s: platform_hal_GetBootloaderVersion failed\n", __FUNCTION__));
-    readMacAddress(pDhcpOption43RawData->cMtaMacAddress);
-
-    if (strlen(pDhcpOption43RawData->cMtaMacAddress) == 0)
-    {
-        CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
-        snprintf(pDhcpOption43RawData->cMtaMacAddress, sizeof(pDhcpOption43RawData->cMtaMacAddress), "78:B3:9F:8F:F2:25");
-    }
-
-    CcspTraceInfo(("%s: Serial Number = %s\n", __FUNCTION__, pDhcpOption43RawData->cSerialNumber));
-    CcspTraceInfo(("%s: Hardware Version = %s\n", __FUNCTION__, pDhcpOption43RawData->cHardwareVersion));
-    CcspTraceInfo(("%s: Software Version = %s\n", __FUNCTION__, pDhcpOption43RawData->cSoftwareVersion));
-    CcspTraceInfo(("%s: Bootloader Version = %s\n", __FUNCTION__, pDhcpOption43RawData->cBootLoaderVersion));
-    CcspTraceInfo(("%s: OUI = %s\n", __FUNCTION__, pDhcpOption43RawData->cOUID));
-    CcspTraceInfo(("%s: Model Number = %s\n", __FUNCTION__, pDhcpOption43RawData->cModelNumber));
-    CcspTraceInfo(("%s: Vendor Name = %s\n", __FUNCTION__, pDhcpOption43RawData->cVendorName));
-    CcspTraceInfo(("%s: MTA MAC Address = %s\n", __FUNCTION__, pDhcpOption43RawData->cMtaMacAddress));
-
-    return;
-}
-
-static int prepareDhcpOption43(const dhcpOption43RawData_t * pDhcpOption43RawData,char *pOutbuf, int iOutbufLen)
-{
-    if ((NULL == pDhcpOption43RawData) || (NULL == pOutbuf) || (iOutbufLen < 512)) {
-        return -1;
-    }
-    srand((unsigned int)time(NULL));
-    unsigned char cHexBuf[512] = {0};
-    int iIndex = 0;
-
- // Type 02: EDVA identifier (fixed)
-    cHexBuf[iIndex++] = 0x02;  // Type
-    cHexBuf[iIndex++] = 0x04;  // Length = 4
-    cHexBuf[iIndex++] = 0x45;  // 'E'
-    cHexBuf[iIndex++] = 0x44;  // 'D'
-    cHexBuf[iIndex++] = 0x56;  // 'V'
-    cHexBuf[iIndex++] = 0x41;  // 'A'
-
-    CcspTraceInfo(("%s: EDVA Identifier:%02x %02x %02x %02x\n", __FUNCTION__,
-        cHexBuf[iIndex - 4], cHexBuf[iIndex - 3], cHexBuf[iIndex - 2], cHexBuf[iIndex - 1]));
-    // Type 04: Serial Number
-    size_t iSerialLen = strlen(pDhcpOption43RawData->cSerialNumber);
-    cHexBuf[iIndex++] = 0x04;  // Type
-    cHexBuf[iIndex++] = (unsigned char)iSerialLen;  // Length
-    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cSerialNumber, iSerialLen);
-    iIndex += iSerialLen;
-
-    // Type 05: Hardware Version
-    size_t iHardwareVerLen = strlen(pDhcpOption43RawData->cHardwareVersion);
-    cHexBuf[iIndex++] = 0x05;  // Type
-    cHexBuf[iIndex++] = (unsigned char)iHardwareVerLen;  // Length
-    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cHardwareVersion, iHardwareVerLen);
-    iIndex += iHardwareVerLen;
-
-    // Check for override file
-    FILE *pOverride = fopen("/tmp/mtaDhcpOption43.txt", "r");
-    int isOverride = (pOverride != NULL);
-    if (pOverride)
-        fclose(pOverride);
-
-    CcspTraceInfo(("%s: Software and Bootloader Version Override %s\n", __FUNCTION__, isOverride ? "ENABLED" : "DISABLED"));
-    // Type 06: software version
-    const char *pSoftwareVersion = isOverride ? "Prod_23_2_231009" : pDhcpOption43RawData->cSoftwareVersion;
-    size_t iSoftwareVerLen = strlen(pSoftwareVersion);
-    cHexBuf[iIndex++] = 0x06;  // Type
-    cHexBuf[iIndex++] = (unsigned char)iSoftwareVerLen;  // Length
-    memcpy(&cHexBuf[iIndex], pSoftwareVersion, iSoftwareVerLen);
-    iIndex += iSoftwareVerLen;
-
-    // Type 07: Bootloader Version
-    const char *pBootLoaderVersion = isOverride ? "S1TC-3.63.20.104" : pDhcpOption43RawData->cBootLoaderVersion;
-    size_t uiProductLen = strlen(pBootLoaderVersion);
-    cHexBuf[iIndex++] = 0x07;  // Type
-    cHexBuf[iIndex++] = (unsigned char)uiProductLen;  // Length
-    memcpy(&cHexBuf[iIndex], pBootLoaderVersion, uiProductLen);
-    iIndex += uiProductLen;
-
-    // Type 08: OUI
-    int iOuiLen = 3;//As per standard OUI length is 3 bytes
-#if 0
-    unsigned char cOui[3] = {0};
-    // Try to parse as hex string (e.g., "0030F4" or "00:30:F4")
-    if ((sscanf(pDhcpOption43RawData->cOUID, "%2hhx%2hhx%2hhx", &cOui[0], &cOui[1], &cOui[2]) != iOuiLen) &&
-       (sscanf(pDhcpOption43RawData->cOUID, "%2hhx:%2hhx:%2hhx", &cOui[0], &cOui[1], &cOui[2]) != iOuiLen)) {
-        CcspTraceError(("%s: Invalid OUI format from hal: %s\n", __FUNCTION__, pDhcpOption43RawData->cOUID));
-        //Hardcode default OUI which we got from internet for Sercomm Devices
-        cOui[0] = 0x00;
-        cOui[1] = 0x30;
-        cOui[2] = 0xF4;
-    }
-#endif
-    cHexBuf[iIndex++] = 0x08;  // Type
-    cHexBuf[iIndex++] = (unsigned char)iOuiLen;  // Length
-    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cOUID, iOuiLen);
-    iIndex += iOuiLen;
-
-    // Type 09: Model Number
-    size_t iModelLen = strlen(pDhcpOption43RawData->cModelNumber);
-    cHexBuf[iIndex++] = 0x09;  // Type
-    cHexBuf[iIndex++] = (unsigned char)iModelLen;  // Length
-    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cModelNumber, iModelLen);
-    iIndex += iModelLen;
-
-    // Type 0A: Vendor Name
-    size_t iVendorLen = strlen(pDhcpOption43RawData->cVendorName);
-    cHexBuf[iIndex++] = 0x0a;  // Type
-    cHexBuf[iIndex++] = (unsigned char)iVendorLen;  // Length
-    memcpy(&cHexBuf[iIndex], pDhcpOption43RawData->cVendorName, iVendorLen);
-    iIndex += iVendorLen;
-
-    // Type 1F: MAC Address (6 bytes, binary format)
-    cHexBuf[iIndex++] = 0x1f;  // Type
-    cHexBuf[iIndex++] = 0x06;  // Length = 6 bytes
-    // Parse MAC address from string (e.g., "78:B3:9F:8F:F2:25" or "78b39f8ff225")
-    unsigned char mac[6];
-    if (sscanf(pDhcpOption43RawData->cMtaMacAddress, "%02x:%02x:%02x:%02x:%02x:%02x",
-               (unsigned int*)&mac[0], (unsigned int*)&mac[1], (unsigned int*)&mac[2],
-               (unsigned int*)&mac[3], (unsigned int*)&mac[4], (unsigned int*)&mac[5]) == 6) {
-        memcpy(&cHexBuf[iIndex], mac, 6);
-        iIndex += 6;
-    } else {
-        // Try without colons
-        if (sscanf(pDhcpOption43RawData->cMtaMacAddress, "%02x%02x%02x%02x%02x%02x",
-                   (unsigned int*)&mac[0], (unsigned int*)&mac[1], (unsigned int*)&mac[2],
-                   (unsigned int*)&mac[3], (unsigned int*)&mac[4], (unsigned int*)&mac[5]) == 6) {
-            memcpy(&cHexBuf[iIndex], mac, 6);
-            iIndex += 6;
-        }
-    }
-
-    // Type 20: Correlation ID (4 bytes, binary)
-    // Generate random correlation ID
-    uint32_t ui32CorrelationId = ((uint32_t)rand() << 16) | ((uint32_t)rand() & 0xFFFF);
-
-    cHexBuf[iIndex++] = 0x20;  // Type
-    cHexBuf[iIndex++] = 0x04;  // Length = 4 bytes
-    cHexBuf[iIndex++] = (unsigned char)((ui32CorrelationId >> 24) & 0xFF);
-    cHexBuf[iIndex++] = (unsigned char)((ui32CorrelationId >> 16) & 0xFF);
-    cHexBuf[iIndex++] = (unsigned char)((ui32CorrelationId >> 8) & 0xFF);
-    cHexBuf[iIndex++] = (unsigned char)(ui32CorrelationId & 0xFF);
-
-    CcspTraceInfo(("%s: Correlation ID: %08x\n", __FUNCTION__, ui32CorrelationId));
-
-    /* Convert to hex string with "0x2b:" prefix */
-    int iWritten = snprintf(pOutbuf, iOutbufLen, "0x2b:");
-    if (iWritten < 0 || iWritten >= iOutbufLen) {
-        return -1;
-    }
-
-    for (int i = 0; i < iIndex; i++) {
-        int iRet = snprintf(pOutbuf + iWritten, iOutbufLen - iWritten, "%02x", cHexBuf[i]);
-        if (iRet < 0 || (iWritten + iRet) >= iOutbufLen) {
-            return -1;
-        }
-        iWritten += iRet;
-    }
-    return iWritten;
-}
-static int prepareDhcpOption60(const VoicePktcCapabilitiesType *pVoicePktCap,char *pOutbuf, int iOutbufLen)
-{
-    if ((NULL == pVoicePktCap) || (NULL == pOutbuf) || (iOutbufLen < 200)) {
-        return -1;
-	}
-
-    unsigned char cHexBuf[512] = {0};
-    int iIndex = 0;
-    /* Vendor prefix (Technicolor/Comcast specific) */
-    cHexBuf[iIndex++] = 0x05;
-    cHexBuf[iIndex++] = 0x49;
-
-    /* Subopt 1: pktcblVersion */
-    cHexBuf[iIndex++] = 0x01;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->pktcblVersion);
-    cHexBuf[iIndex++] = pVoicePktCap->pktcblVersion;
-
-    /* Subopt 2: numEndpoints */
-    cHexBuf[iIndex++] = 0x02;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->numEndpoints);
-    cHexBuf[iIndex++] = pVoicePktCap->numEndpoints;
-
-    /* Subopt 3: tgtSupport */
-    cHexBuf[iIndex++] = 0x03;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->tgtSupport);
-    cHexBuf[iIndex++] = pVoicePktCap->tgtSupport;
-
-    /* Subopt 4: httpDownload */
-    cHexBuf[iIndex++] = 0x04;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->httpDownload);
-    cHexBuf[iIndex++] = pVoicePktCap->httpDownload;
-
-    /* Subopt 9: nvramInfoStorage */
-    cHexBuf[iIndex++] = 0x09;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->nvramInfoStorage);
-    cHexBuf[iIndex++] = pVoicePktCap->nvramInfoStorage;
-
-    #if 0
-    /* Subopt 11: supportedCodecs */
-    cHexBuf[iIndex++] = 0x0b;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->supportedCodecs);
-    memcpy(&cHexBuf[iIndex], pVoicePktCap->supportedCodecs, sizeof(pVoicePktCap->supportedCodecs));
-    iIndex += sizeof(pVoicePktCap->supportedCodecs);
-    #else
-    /* Subopt 11: supportedCodecs, As now hardcoded until we get the update from broadcom */
-    cHexBuf[iIndex++] = 0x0b;
-    cHexBuf[iIndex++] = 0x0b;  // Length = 11 bytes
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[0];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[1];
-    cHexBuf[iIndex++] = pVoicePktCap->supportedCodecs[2];
-    //Rest of the value is   1 01 01 09 04 00 01 01
-    cHexBuf[iIndex++] = 0x01;
-    cHexBuf[iIndex++] = 0x01;
-    cHexBuf[iIndex++] = 0x01;
-    cHexBuf[iIndex++] = 0x09;
-    cHexBuf[iIndex++] = 0x04;
-    cHexBuf[iIndex++] = 0x00;
-    cHexBuf[iIndex++] = 0x01;
-    cHexBuf[iIndex++] = 0x01;
-    #endif
-    /* Subopt 12: silenceSuppression (mapped to subopt 0x0c) */
-    cHexBuf[iIndex++] = 0x0c;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->silenceSuppression);
-    cHexBuf[iIndex++] = pVoicePktCap->silenceSuppression;
-
-    /* Subopt 13: echoCancellation (mapped to subopt 0x0d) */
-    cHexBuf[iIndex++] = 0x0d;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->echoCancellation);
-    cHexBuf[iIndex++] = pVoicePktCap->echoCancellation;
-
-    /* Subopt 15: ugsAd (mapped to subopt 0x0f) */
-    cHexBuf[iIndex++] = 0x0f;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->ugsAd);
-    cHexBuf[iIndex++] = pVoicePktCap->ugsAd;
-
-    /* Subopt 16: ifIndexStart (mapped to subopt 0x10) */
-    cHexBuf[iIndex++] = 0x10;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->ifIndexStart);
-    cHexBuf[iIndex++] = pVoicePktCap->ifIndexStart;
-
-    /* Subopt 18: supportedProvFlow (mapped to subopt 0x12) */
-    cHexBuf[iIndex++] = 0x12;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->supportedProvFlow);
-    cHexBuf[iIndex++] = (pVoicePktCap->supportedProvFlow >> 8) & 0xFF; // High byte
-    cHexBuf[iIndex++] = pVoicePktCap->supportedProvFlow & 0xFF; // Low byte
-
-    /* Subopt 19: t38Version (mapped to subopt 0x13) */
-    cHexBuf[iIndex++] = 0x13;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->t38Version);
-    cHexBuf[iIndex++] = pVoicePktCap->t38Version;
-
-    /* Subopt 20: t38ErrorCorrection (mapped to subopt 0x14) */
-    cHexBuf[iIndex++] = 0x14;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->t38ErrorCorrection);
-    cHexBuf[iIndex++] = pVoicePktCap->t38ErrorCorrection;
-
-    /* Subopt 21: rfc2833 (mapped to subopt 0x15) */
-    cHexBuf[iIndex++] = 0x15;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->rfc2833);
-    cHexBuf[iIndex++] = pVoicePktCap->rfc2833;
-
-    /* Subopt 22: voiceMetrics (mapped to subopt 0x16) */
-    cHexBuf[iIndex++] = 0x16;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->voiceMetrics);
-    cHexBuf[iIndex++] = pVoicePktCap->voiceMetrics;
-
-    /* Subopt 23: supportedMibs (mapped to subopt 0x17) */
-    cHexBuf[iIndex++] = 0x17;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->supportedMibs);
-    memcpy(&cHexBuf[iIndex], pVoicePktCap->supportedMibs, sizeof(pVoicePktCap->supportedMibs));
-    iIndex += sizeof(pVoicePktCap->supportedMibs);
-
-    /* Subopt 24: multiGrants (mapped to subopt 0x18) */
-    cHexBuf[iIndex++] = 0x18;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->multiGrants);
-    cHexBuf[iIndex++] = pVoicePktCap->multiGrants;
-
-    /* Subopt 25: v_152 (mapped to subopt 0x19) */
-    cHexBuf[iIndex++] = 0x19;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->v_152);
-    cHexBuf[iIndex++] = pVoicePktCap->v_152;
-
-    /* Subopt 26: certBootstrapping (mapped to subopt 0x1a) */
-    cHexBuf[iIndex++] = 0x1a;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->certBootstrapping);
-    cHexBuf[iIndex++] = pVoicePktCap->certBootstrapping;
-
-    /* Subopt 38: ipAddrProvCap (mapped to subopt 0x26) */
-    cHexBuf[iIndex++] = 0x26;
-    cHexBuf[iIndex++] = sizeof(pVoicePktCap->ipAddrProvCap);
-    cHexBuf[iIndex++] = pVoicePktCap->ipAddrProvCap;
-
-    int iWritten = snprintf(pOutbuf, iOutbufLen, "pktc2.0:");
-    if (iWritten < 0 || iWritten >= iOutbufLen) {
-        return -1;
-    }
-
-    for (int iVar = 0; iVar < iIndex; iVar++) {
-        int iRet = snprintf(pOutbuf + iWritten, iOutbufLen - iWritten, "%02x", cHexBuf[iVar]);
-        if (iRet < 0 || iWritten + iRet >= iOutbufLen) {
-            return -1;
-        }
-        iWritten += iRet;
-    }
-    return iWritten;
-}
-
-static void readDhcpOptionsFromHal(char * pDhcpOption43, int iDhcpOption43Len, char *pDhcpOption60, int iDhcpOption60Len)
-{
-    if (NULL == pDhcpOption43 || NULL == pDhcpOption60 || iDhcpOption43Len < 512 || iDhcpOption60Len < 256)
-    {
-        CcspTraceError(("%s: Invalid NULL pointer or insufficient buffer length\n", __FUNCTION__));
-        return;
-    }
-    VoicePktcCapabilitiesType sVoicePktcCapabilities = {0};
-    CcspTraceInfo(("%s:<--->Sizeof(VoicePktcCapabilitiesType) = %zu\n", __FUNCTION__, sizeof(VoicePktcCapabilitiesType)));
-    uint8_t ui8Ret = voice_hal_get_pktc_capabilities(&sVoicePktcCapabilities);
-    CcspTraceInfo(("%s ui8Ret = %d\n", __FUNCTION__, ui8Ret));
-    if(ui8Ret == 1)
-    {
-        CcspTraceInfo(("Original: voice_hal_get_pktc_capabilities Values '%s'\n", __FUNCTION__));
-        CcspTraceInfo(("%s: pktcblVersion = %d\n", __FUNCTION__, sVoicePktcCapabilities.pktcblVersion));
-        CcspTraceInfo(("%s: numEndpoints = %d\n", __FUNCTION__, sVoicePktcCapabilities.numEndpoints));
-        CcspTraceInfo(("%s: tgtSupport = %d\n", __FUNCTION__, sVoicePktcCapabilities.tgtSupport));
-        CcspTraceInfo(("%s: httpDownload = %d\n", __FUNCTION__, sVoicePktcCapabilities.httpDownload));
-        CcspTraceInfo(("%s: nvramInfoStorage = %d\n", __FUNCTION__, sVoicePktcCapabilities.nvramInfoStorage));
-        /*CcspTraceInfo(("%s: supportedCodecs = %02x %02x %02x %2x %02x %02x %02x %02x %02x %02x %02x\n", __FUNCTION__,
-                    sVoicePktcCapabilities.supportedCodecs[0], sVoicePktcCapabilities.supportedCodecs[1], sVoicePktcCapabilities.supportedCodecs[2],
-                    sVoicePktcCapabilities.supportedCodecs[3], sVoicePktcCapabilities.supportedCodecs[4], sVoicePktcCapabilities.supportedCodecs[5],
-                    sVoicePktcCapabilities.supportedCodecs[6], sVoicePktcCapabilities.supportedCodecs[7], sVoicePktcCapabilities.supportedCodecs[8],
-                    sVoicePktcCapabilities.supportedCodecs[9], sVoicePktcCapabilities.supportedCodecs[10]));*/
-        CcspTraceInfo(("%s: supportedCodecs = %02x %02x %02x\n", __FUNCTION__,
-                    sVoicePktcCapabilities.supportedCodecs[0], sVoicePktcCapabilities.supportedCodecs[1], sVoicePktcCapabilities.supportedCodecs[2]));
-        CcspTraceInfo(("%s: silenceSuppression = %d\n", __FUNCTION__, sVoicePktcCapabilities.silenceSuppression));
-        CcspTraceInfo(("%s: echoCancellation = %d\n", __FUNCTION__, sVoicePktcCapabilities.echoCancellation));
-        CcspTraceInfo(("%s: ugsAd = %d\n", __FUNCTION__, sVoicePktcCapabilities.ugsAd));
-        CcspTraceInfo(("%s: ifIndexStart = %d\n", __FUNCTION__, sVoicePktcCapabilities.ifIndexStart));
-        CcspTraceInfo(("%s: supportedProvFlow = %d\n", __FUNCTION__, sVoicePktcCapabilities.supportedProvFlow));
-        CcspTraceInfo(("%s: t38Version = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38Version));
-        CcspTraceInfo(("%s: t38ErrorCorrection = %d\n", __FUNCTION__, sVoicePktcCapabilities.t38ErrorCorrection));
-        CcspTraceInfo(("%s: rfc2833 = %d\n", __FUNCTION__, sVoicePktcCapabilities.rfc2833));
-        CcspTraceInfo(("%s: voiceMetrics = %d\n", __FUNCTION__, sVoicePktcCapabilities.voiceMetrics));
-        CcspTraceInfo(("%s: supportedMibs = %02x %02x %02x\n", __FUNCTION__, sVoicePktcCapabilities.supportedMibs[0], sVoicePktcCapabilities.supportedMibs[1], sVoicePktcCapabilities.supportedMibs[2]));
-        CcspTraceInfo(("%s: multiGrants = %d\n", __FUNCTION__, sVoicePktcCapabilities.multiGrants));
-        CcspTraceInfo(("%s: v_152 = %d\n", __FUNCTION__, sVoicePktcCapabilities.v_152));
-        CcspTraceInfo(("%s: certBootstrapping = %d\n", __FUNCTION__, sVoicePktcCapabilities.certBootstrapping));
-        CcspTraceInfo(("%s: ipAddrProvCap = %d\n", __FUNCTION__, sVoicePktcCapabilities.ipAddrProvCap));
-        // Using above data prepare the DHCP options value 43 and 125 in hex format
-        char cHexBuf[512] = {0};
-        dhcpOption43RawData_t dhcpOption43RawData = {0};
-        getDhcpOption43RawData(&dhcpOption43RawData);
-
-        int iLen43 = prepareDhcpOption43(&dhcpOption43RawData, cHexBuf, sizeof(cHexBuf));
-        CcspTraceInfo(("%s: DHCP Option 43 length = %d\n", __FUNCTION__, iLen43));
-        CcspTraceInfo(("%s: DHCP Option 43 hex = %s\n", __FUNCTION__, cHexBuf));
-
-        char cBufOption60[256] = {0};
-        int iLen60 = prepareDhcpOption60(&sVoicePktcCapabilities,cBufOption60, sizeof(cBufOption60));
-        CcspTraceInfo(("%s: DHCP Option 60 length = %d\n", __FUNCTION__, iLen60));
-        CcspTraceInfo(("%s: DHCP Option 60 hex = %s\n", __FUNCTION__, cBufOption60));
-        if (pDhcpOption43 != NULL) {
-            snprintf(pDhcpOption43, iDhcpOption43Len, "%s", cHexBuf);
-        }
-        if (pDhcpOption60 != NULL) {
-            snprintf(pDhcpOption60, iDhcpOption60Len, "%s", cBufOption60);
-        }
-    }
-    else
-    {
-        CcspTraceError(("voice_hal_get_pktc_capabilities failed '%s'\n", __FUNCTION__));
-    }
-}
-#if 0
-static bool isXf10OrXer10Model(void)
-{
-    char cModelNum[32] = {0};
-    if (RETURN_OK != platform_hal_GetModelName(cModelNum))
-    {
-        CcspTraceError(("%s: platform_hal_GetModelName failed\n", __FUNCTION__));
-        return false;
-    }
-    CcspTraceInfo(("%s: MODEL_NUM = %s\n", __FUNCTION__, cModelNum));
-#if 0
-    FILE *pFILE = fopen("/etc/device.properties", "r");
-    if (pFILE != NULL)
-    {
-        char cLine[128] = {0};
-        while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
-        {
-            if (strncmp(cLine, "MODEL_NUM=", 10) == 0)
-            {
-                char *pModel = cLine + 10;
-                pModel[strcspn(pModel, "\n")] = 0; // Remove newline character
-                strcpy_s(cModelNum, sizeof(cModelNum), pModel);
-                break;
-            }
-        }
-        fclose(pFILE);
-    }
-#endif
-    if (strcmp(cModelNum, "SCER11BEL") == 0 || strcmp(cModelNum, "SCXF11BFL") == 0)
-    {
-        return true;
-    }
-    return false;
-}
-#endif
-
-void *udhcpcMonitorThread(void *arg)
-{
-    udhcpcMonitorArgs_t *pArgs = (udhcpcMonitorArgs_t *)arg;
-    if (pArgs == NULL) {
-        CcspTraceError(("%s-%d: Invalid NULL pointer\n", __FUNCTION__, __LINE__));
-        return NULL;
-    }
-
-    char cPidFilePath[128] = {0};
-    snprintf(cPidFilePath, sizeof(cPidFilePath), "/tmp/udhcpc_%s.pid", pArgs->cIfName);
-
-    char *argv[] = {
-        "udhcpc",
-        "-f",  // Run in foreground
-        "-O", "2",
-        "-O", "122",
-        "-O", "4",
-        "-O", "7",
-        "-O", "43",
-        "-O", "54",
-        "-O", "99",
-        "-O", "123",
-        "-O", "125",
-        "-O", "timezone",
-        "-V", "eRouter1.0",
-        "-x", pArgs->cDhcpOption43,
-        "-i", pArgs->cIfName,
-        "-p", cPidFilePath,
-        "-V", pArgs->cDhcpOption60,
-        "-s", "/usr/bin/service_udhcpc",
-        NULL
-    };
-
-    // Main monitoring loop
-    while (1) {
-        CcspTraceInfo(("%s-%d: Starting udhcpc on interface %s\n",
-               __FUNCTION__, __LINE__, pArgs->cIfName));
-
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process - execute udhcpc
-            execvp("udhcpc", argv);
-
-            // If we reach here, execvp failed
-            CcspTraceError(("%s-%d: execvp failed: %s\n",
-                   __FUNCTION__, __LINE__, strerror(errno)));
-            _exit(127);
-        } else if (pid > 0) {
-            // Parent - wait for child to exit
-            int status;
-            CcspTraceInfo(("%s-%d: Started udhcpc with PID %d, monitoring\n",
-                   __FUNCTION__, __LINE__, pid));
-            waitpid(pid, &status, 0);  // Block until udhcpc exits
-            // udhcpc exited - log and restart
-            if (WIFEXITED(status)) {
-                CcspTraceWarning(("%s-%d: udhcpc exited with status %d, restarting in 2 seconds\n",
-                       __FUNCTION__, __LINE__, WEXITSTATUS(status)));
-            } else if (WIFSIGNALED(status)) {
-                CcspTraceWarning(("%s-%d: udhcpc killed by signal %d, restarting in 2 seconds\n",
-                       __FUNCTION__, __LINE__, WTERMSIG(status)));
-            }
-            
-            sleep(2);  // Wait before restarting
-
-        } else {
-            // Fork failed
-            CcspTraceError(("%s-%d: fork failed: %s, retrying in 5 seconds\n",
-                   __FUNCTION__, __LINE__, strerror(errno)));
-            sleep(5);
-        }
-    }
-    return NULL;
-}
-
-
-void startUdhcpcProcess(char *pMtaInterfaceName, char *pDhcpOption43, char *pDhcpOption60)
-{
-    if (pMtaInterfaceName == NULL || pDhcpOption43 == NULL || pDhcpOption60 == NULL) {
-        CcspTraceError(("%s-%d, Invalid NULL pointer\n", __FUNCTION__, __LINE__ ));
-        return;
-    }
-
-    // Allocate args on heap so they persist after function returns
-    static udhcpcMonitorArgs_t sUdhcpcMonitorArgs = {0};
-
-    snprintf(sUdhcpcMonitorArgs.cIfName, sizeof(sUdhcpcMonitorArgs.cIfName),
-             "%s", pMtaInterfaceName);
-    snprintf(sUdhcpcMonitorArgs.cDhcpOption43, sizeof(sUdhcpcMonitorArgs.cDhcpOption43),
-             "%s", pDhcpOption43);
-    snprintf(sUdhcpcMonitorArgs.cDhcpOption60, sizeof(sUdhcpcMonitorArgs.cDhcpOption60),
-             "%s", pDhcpOption60);
-
-    pthread_t threadId;
-    if (pthread_create(&threadId, NULL, udhcpcMonitorThread, 
-                       (void *)&sUdhcpcMonitorArgs) != 0) {
-        CcspTraceError(("%s-%d, Failed to create udhcpc monitor thread\n", __FUNCTION__, __LINE__));
-        return;
-    }
-    pthread_detach(threadId);
-    CcspTraceInfo(("%s-%d, udhcpc monitor thread created successfully\n", __FUNCTION__, __LINE__));
-}
 static void createMtaInterface(void)
 {
     char cVoiceSupportEnabled[8] = {0};
@@ -765,7 +233,7 @@ static void createMtaInterface(void)
         CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
         return;
     }
-    CcspTraceError(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceMac));
+    CcspTraceInfo(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceMac));
     syscfg_get(NULL, "wan_physical_ifname", cWanIfname, sizeof(cWanIfname));
     CcspTraceInfo(("%s:%d, WAN Physical Ifname is %s\n", __FUNCTION__, __LINE__, cWanIfname));
     if (cWanIfname[0] == '\0')
@@ -782,20 +250,11 @@ static void createMtaInterface(void)
     system(cCmd);
     CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
 
-    char cDhcpOption43[512] = {0};
-    char cDhcpOption60[512] = {0};
-    CcspTraceInfo(("%s:%d, Reading DHCP Options from HAL\n", __FUNCTION__, __LINE__));
-    readDhcpOptionsFromHal(cDhcpOption43, sizeof(cDhcpOption43), cDhcpOption60, sizeof(cDhcpOption60));
-
-    if ((cDhcpOption43[0] == '\0') || (cDhcpOption60[0] == '\0')) {
-        CcspTraceError(("%s:%d, DHCP Options read from HAL are invalid, skipping udhcpc start\n", __FUNCTION__, __LINE__));
-        return;
-    }
 
     syscfg_get(NULL, "VoiceSupport_Mode",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
     if (0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_DUAL_STACK)) {
         CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
-        startUdhcpcProcess(cVoiceSupportIfaceName, cDhcpOption43, cDhcpOption60);
+        enableDhcpv4ForMta(cVoiceSupportIfaceName);
     } else {
         CcspTraceInfo(("%s:%d, VoiceMtaIface_DhcpV4Enabled :%s, is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__, cMtaIfaceDhcpV4Enabled));
     }
@@ -1930,7 +1389,8 @@ void * Mta_Sysevent_thread(void *  hThisObject)
       	        CosaMTAInitializeEthWanProv(pMyObject);
              }
              #if defined (SCXF10)
-             CcspTraceWarning(("%s current_wan_state up, Initializing MTA Inteface \n",__FUNCTION__));
+             CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Inteface \n",__FUNCTION__,__LINE__));
+             initRbusHandle();
              createMtaInterface();
              #endif
          }
@@ -1977,6 +1437,11 @@ void * Mta_Sysevent_thread(void *  hThisObject)
 #endif
                         if((rc == EOK) && (ind == 0))
                         {
+                            #if defined (SCXF10)
+                            CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Inteface \n",__FUNCTION__,__LINE__));
+                            initRbusHandle();
+                            createMtaInterface();
+                            #endif
                             if(mtaInEthernetMode != isEthEnabled)
                             {
                                 CcspTraceError(("%s:%d MTA is in incorrect WAN state. MTA started in %s, but selected WAN mode %s . MTA agent will be restarted.\n",__FUNCTION__,__LINE__, mtaInEthernetMode?"Ethernet":"DOCSIS", isEthEnabled?"Ethernet":"DOCSIS"));
@@ -1994,126 +1459,6 @@ void * Mta_Sysevent_thread(void *  hThisObject)
 
 
 
-}
-
-void voiceDhcpV4Update(ipcMtaVoiceDhcpv4Data_t *pDhcpV4Data)
-{
-    if (NULL == pDhcpV4Data)
-    {
-        CcspTraceError(("%s: Invalid DHCPv4 data pointer!\n", __FUNCTION__));
-        return;
-    }
-    CcspTraceInfo(("%s: DHCPv4 State Changed \n", __FUNCTION__));
-    CcspTraceInfo(("%s: IP Address Assigned=%d \n", __FUNCTION__, pDhcpV4Data->bIsAddrAssigned));
-    CcspTraceInfo(("%s: IP Address Expired=%d \n", __FUNCTION__, pDhcpV4Data->bIsIpExpired));
-
-    CcspTraceInfo(("%s: Lease Time=%d \n", __FUNCTION__, pDhcpV4Data->ui32LeaseTime));
-    CcspTraceInfo(("%s: Rebinding Time=%d \n", __FUNCTION__, pDhcpV4Data->ui32RebindingTime));
-    CcspTraceInfo(("%s: Renewal Time=%d \n", __FUNCTION__, pDhcpV4Data->ui32RenewalTime));
-    CcspTraceInfo(("%s: Time Offset=%d \n", __FUNCTION__, pDhcpV4Data->i32TimeOffset));
-
-    CcspTraceInfo(("%s: Dhcp Interface=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpcInterface));
-    CcspTraceInfo(("%s: IP Address=%s \n", __FUNCTION__, pDhcpV4Data->cIp));
-    CcspTraceInfo(("%s: Bootfile Name=%s \n", __FUNCTION__, pDhcpV4Data->cBootfileName));
-    CcspTraceInfo(("%s: Dhcp Server Name=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpServerName));
-    CcspTraceInfo(("%s: Dhcp Server Id=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpServerId));
-    CcspTraceInfo(("%s: Dhcp Server IP=%s \n", __FUNCTION__, pDhcpV4Data->cDhcpServerIp));
-    CcspTraceInfo(("%s: Netmask=%s \n", __FUNCTION__, pDhcpV4Data->cMask));
-    CcspTraceInfo(("%s: Router IP=%s \n", __FUNCTION__, pDhcpV4Data->cRouterIp));
-    CcspTraceInfo(("%s: DNS Server 1=%s \n", __FUNCTION__, pDhcpV4Data->cDnsServer));
-    CcspTraceInfo(("%s: DNS Server 2=%s \n", __FUNCTION__, pDhcpV4Data->cDnsServer1));
-    CcspTraceInfo(("%s: Log Server=%s \n", __FUNCTION__, pDhcpV4Data->cLogServer));
-    CcspTraceInfo(("%s: Domain Name=%s \n", __FUNCTION__, pDhcpV4Data->cDomainName));
-    CcspTraceInfo(("%s: Host Name=%s \n", __FUNCTION__, pDhcpV4Data->cHostName));
-    CcspTraceInfo(("%s: Time Server=%s \n", __FUNCTION__, pDhcpV4Data->cTimeServer));
-    CcspTraceInfo(("%s: Option 122=%s \n", __FUNCTION__, pDhcpV4Data->cOption122));
-    CcspTraceInfo(("%s: Broadcast IP=%s \n", __FUNCTION__, pDhcpV4Data->cBroadcastIp));
-    CcspTraceInfo(("%s: Time Zone=%s \n", __FUNCTION__, pDhcpV4Data->cTimeZone));
-    CcspTraceInfo(("%s: TFTP Address=%s \n", __FUNCTION__, pDhcpV4Data->cTftpAddr));
-
-}
-static void *MtaIpcServerThread(void *arg)
-{
-    UNREFERENCED_PARAMETER(arg);
-    pthread_detach(pthread_self());
-
-    int iIpcListienFd = -1;
-
-    while (1)
-    {
-        CcspTraceInfo(("%s-%d: Creating the Nano socket and bind/listen...\n", __FUNCTION__, __LINE__));
-        iIpcListienFd = nn_socket(AF_SP, NN_PULL);
-        if ( iIpcListienFd < 0 )
-        {
-            CcspTraceError(("%s: Failed to create the Nano socket[%s]!\n", __FUNCTION__, strerror(errno)));
-            return NULL;
-        }
-        if (nn_bind(iIpcListienFd, MTA_AGENT_ADDR) < 0)
-        {
-            CcspTraceError(("%s: Failed to bind the Nano socket[%s] to %s!\n", __FUNCTION__, strerror(errno), MTA_AGENT_ADDR));
-            nn_close(iIpcListienFd);
-            sleep(5);
-            continue;
-        }
-        else
-        {
-            CcspTraceInfo(("%s: Nano socket created and bound to %s successfully!\n", __FUNCTION__, MTA_AGENT_ADDR));
-            break;
-        }
-    }
-
-    int iRecvBytes = 0;
-    int iMsgSize = sizeof(ipcMtaVoiceData_t);
-    ipcMtaVoiceData_t sRecvVoiceData;
-    memset(&sRecvVoiceData, 0, sizeof(ipcMtaVoiceData_t));
-
-    while(1)
-    {
-        iRecvBytes = nn_recv(iIpcListienFd, &sRecvVoiceData, iMsgSize, 0);
-        if (iRecvBytes == iMsgSize)
-        {
-            CcspTraceInfo(("%s: Received IPC message, Type=%d!\n", __FUNCTION__, sRecvVoiceData.eMsgType));
-
-            switch (sRecvVoiceData.eMsgType)
-            {
-                case DHCPv4_STATE_CHANGED:
-                    voiceDhcpV4Update(&(sRecvVoiceData.data.sVoiceDhcpv4));
-                    break;
-
-                default:
-                    CcspTraceError(("%s: Unknown IPC message type=%d received!\n", __FUNCTION__, sRecvVoiceData.eMsgType));
-                    break;
-            }
-        }
-        else
-        {
-            CcspTraceError(("%s: Failed to receive complete IPC message, recvBytes=%d!\n", __FUNCTION__, iRecvBytes));
-        }
-    }
-
-    pthread_exit(NULL);
-    return NULL;
-}
-
-ANSC_STATUS mtaAgent_StartIpcServer(void)
-{
-    pthread_t ipcThreadId;
-    ANSC_STATUS   returnStatus = ANSC_STATUS_FAILURE;
-    int iRet = -1;
-
-    iRet = pthread_create(&ipcThreadId, NULL, &MtaIpcServerThread, NULL);
-    if ( iRet != 0 )
-    {
-        CcspTraceError(("%s: Failed to create MTA IPC server thread!\n", __FUNCTION__));
-        return returnStatus;
-    }
-    else
-    {
-        CcspTraceInfo(("%s: MTA IPC server thread created successfully!\n", __FUNCTION__));
-        returnStatus = ANSC_STATUS_SUCCESS;
-    }
-
-    return returnStatus;
 }
 
 /**********************************************************************
@@ -2167,8 +1512,6 @@ CosaMTAInitialize
 
 #endif
     CosaMTALineTableInitialize(hThisObject);
-
-    mtaAgent_StartIpcServer();
     return returnStatus;
 }
 
