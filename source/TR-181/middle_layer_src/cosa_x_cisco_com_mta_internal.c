@@ -185,6 +185,29 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
 }
 
 #if defined (SCXF10)
+/**
+ * @brief Read the EMTA MAC address from the factory NVRAM file.
+ *
+ * This helper function scans the file "/tmp/factory_nvram.data" for a line
+ * beginning with the literal prefix "EMTA " and, if found, copies the
+ * remainder of that line (after the prefix and with the trailing newline
+ * removed) into the caller-supplied buffer as a null-terminated string.
+ *
+ * The MAC address format is whatever textual representation is stored in
+ * the file (for example, a hex string with or without separators); the
+ * string is copied verbatim without validation or normalization.
+ *
+ * @param[in,out] pMacAddress
+ *      Pointer to a character buffer that receives the MAC address string.
+ *      The pointer must be non-NULL and reference a buffer of at least
+ *      32 bytes, as this function copies the string using strcpy_s with a
+ *      destination size of 32 bytes (including the terminating '\0').
+ *
+ * @note
+ *      This function does not return a status; on failure to open or parse
+ *      the file, it logs an error via CcspTraceError and leaves the contents
+ *      of pMacAddress unchanged or partially unchanged.
+ */
 static void readMacAddress (char * pMacAddress)
 {
 	FILE *pFILE = fopen("/tmp/factory_nvram.data", "r");
@@ -209,6 +232,46 @@ static void readMacAddress (char * pMacAddress)
     }
 }
 
+
+/*
+ * createMtaInterface
+ *
+ * Purpose:
+ *     Create and configure the MTA (voice) network interface when voice support
+ *     is enabled on the device. This helper reads syscfg configuration and,
+ *     based on the values retrieved, sets up the logical interface used by the
+ *     MTA subsystem.
+ *
+ * Syscfg dependencies:
+ *     - "VoiceSupport_Enabled"
+ *         Controls whether voice support is enabled. If this value is not set
+ *         or is not "true", the function logs an error and returns without
+ *         creating or modifying the MTA interface.
+ *
+ *     - "VoiceSupport_IfaceName"
+ *         Provides the interface name to be used for the MTA (for example,
+ *         "mta0"). If this value is not set, the function logs a message and
+ *         falls back to the default interface name "mta0".
+ *
+ *     Additional syscfg values may be consulted (such as parameters related to
+ *     DHCPv4 enablement for the MTA interface and the WAN interface name) via
+ *     the local buffers declared in this function. These values influence how
+ *     the interface is configured but do not change the function’s signature
+ *     or return type.
+ *
+ * Error handling and early return behavior:
+ *     - If syscfg indicates that voice support is disabled or unset
+ *       ("VoiceSupport_Enabled" is missing or not "true"), the function logs a
+ *       diagnostic message via CcspTraceError and returns immediately without
+ *       creating the interface.
+ *     - If a required configuration value (such as the interface name or
+ *       platform-specific MAC address) cannot be obtained or is invalid, the
+ *       function may log an error or warning and return early, leaving any
+ *       existing interface state unchanged.
+ *
+ * This function is declared static and returns void; all error reporting is
+ * done via logging, and it does not propagate error codes to callers.
+ */
 static void createMtaInterface(void)
 {
     char cVoiceSupportEnabled[8] = {0};
@@ -224,7 +287,7 @@ static void createMtaInterface(void)
         return;
     }
     if (cVoiceSupportIfaceName[0] == '\0') {
-        CcspTraceError(("%s:%d, mtaIface not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
+        CcspTraceError(("%s:%d, VoiceSupport_IfaceName not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
         strcpy_s(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "mta0");
     }
     //Read the mac address from platform_hal_GetMTAMacAddress API once it is implemented
@@ -250,13 +313,12 @@ static void createMtaInterface(void)
     system(cCmd);
     CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
 
-
     syscfg_get(NULL, "VoiceSupport_Mode",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
     if (0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_DUAL_STACK)) {
         CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
         enableDhcpv4ForMta(cVoiceSupportIfaceName);
     } else {
-        CcspTraceInfo(("%s:%d, VoiceMtaIface_DhcpV4Enabled :%s, is false or not set, skipping udhcpc start\n", __FUNCTION__, __LINE__, cMtaIfaceDhcpV4Enabled));
+        CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
     }
 }
 #endif

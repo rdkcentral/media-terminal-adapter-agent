@@ -25,7 +25,7 @@
 
 rbusHandle_t voiceRbusHandle = NULL;
 extern  ANSC_HANDLE  bus_handle;
-char       cSubsystem[ ]= "eRT.";
+const char cSubsystem[ ]= "eRT.";
 
 static rbusValueType_t convertRbusDataType(paramValueType_t paramType)
 {
