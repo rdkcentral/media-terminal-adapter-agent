@@ -22,10 +22,20 @@
 #include "cosa_rbus_apis.h"
 
 #define  DHCPv4_VOICE_SUPPORT_PARAM "dmsb.voicesupport.Interface.IP.DHCPV4Interface"
+#define  DHCP_MGR_DHCPv4_TABLE "Device.DHCPv4.Client"
+#define  DHCP_MGR_DHCPv6_TABLE "Device.DHCPv6.Client"
 
 rbusHandle_t voiceRbusHandle = NULL;
 extern  ANSC_HANDLE  bus_handle;
 const char cSubsystem[ ]= "eRT.";
+static char cBaseParam[32] = {0};
+
+/*
+* @brief Convert parameter value type to rbus value type.
+*
+* @param[in] paramType  Parameter value type to be converted.
+* @return Corresponding rbus value type.
+*/
 
 static rbusValueType_t convertRbusDataType(paramValueType_t paramType)
 {
@@ -45,6 +55,18 @@ static rbusValueType_t convertRbusDataType(paramValueType_t paramType)
     return rbusType;
 }
 
+/*
+* @brief Set parameter in DHCP manager via RBUS.
+ *
+ * This function sets the specified parameter in the DHCP manager
+ * using RBUS. It constructs an rbus value from the provided parameter
+ * value and type, and performs the set operation. Errors during the
+ * process are logged appropriately.
+ *
+ * @param[in] pParamName   Name of the parameter to be set.
+ * @param[in] pParamValue  Value of the parameter to be set.
+ * @param[in] paramType    Type of the parameter value.
+*/
 static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
 {
     if (voiceRbusHandle == NULL || pParamName == NULL || pParamValue == NULL)   
@@ -81,6 +103,45 @@ static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue,
     rbusValue_Release(rbusValue);
 }
 
+/*
+* @brief Retrieve interface index information for the MTA interface.
+ *
+ * This function retrieves Interface index information for the MTA interface
+ * from the PSM (Persistent Storage Manager) and logs the retrieved value.
+ * It reads the parameter "dmsb.voicesupport.Interface.IP.DHCPV4Interface"
+ * from the PSM and stores it in a static variable for later use. If the
+ * retrieval fails, it logs an error message.
+ */
+
+void getIfaceIndexInfo(void)
+{
+    int iRetPsmGet = CCSP_SUCCESS;
+    char *pParamValue= NULL;
+
+    iRetPsmGet = PSM_Get_Record_Value2(bus_handle, cSubsystem, DHCPv4_VOICE_SUPPORT_PARAM, NULL, &pParamValue);
+    if (iRetPsmGet != CCSP_SUCCESS)
+    {
+        CcspTraceError(("%s: PSM_Get_Record_Value2 failed for param %s with error code %d\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM,
+            iRetPsmGet));
+        return;
+    }
+    else
+    {
+        CcspTraceInfo(("%s: PSM_Get_Record_Value2 successful for param %s with value %s\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM,
+            pParamValue));
+        snprintf(cBaseParam, sizeof(cBaseParam), "%s",pParamValue);
+        ((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc((char *)pParamValue);
+    }
+}
+
+/**
+ * @brief Initialize the RBUS handle used by this module.
+ *
+ * This function initializes and/or acquires the RBUS handle required
+ * for subsequent RBUS operations performed by this component. It
+ * should be called before any other APIs in this module that depend
+ * on an active RBUS connection.
+ */
 void initRbusHandle(void)
 {
     rbusError_t rbusReturn = RBUS_ERROR_SUCCESS;
@@ -98,27 +159,21 @@ void initRbusHandle(void)
     CcspTraceInfo(("%s: rbus_open successful\n", __FUNCTION__));
 }
 
+/**
+ * @brief Enable or configure IPv4 DHCP for the specified MTA interface.
+ *
+ * This function enables DHCPv4 for the MTA (e.g., telephony) interface
+ * identified by the given interface name. The interface name must be a
+ * valid, null-terminated string referring to an existing network
+ * interface on the device.
+ * Also it updates the interface name parameter in DHCP manager via RBUS.
+ *
+ * @param[in] pIfaceName  Name of the MTA network interface for which
+ *                        DHCPv4 should be enabled.
+ */
 void enableDhcpv4ForMta(const char * pIfaceName)
 {
-    int iRetPsmGet = CCSP_SUCCESS;
-    char cBaseParam[32] = {0};
     char cParamName[64] = {0};
-    char *pParamValue= NULL;
-
-    iRetPsmGet = PSM_Get_Record_Value2(bus_handle, cSubsystem, DHCPv4_VOICE_SUPPORT_PARAM, NULL, &pParamValue);
-    if (iRetPsmGet != CCSP_SUCCESS)
-    {
-        CcspTraceError(("%s: PSM_Get_Record_Value2 failed for param %s with error code %d\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM,
-            iRetPsmGet));
-        return;
-    }
-    else
-    {
-        CcspTraceInfo(("%s: PSM_Get_Record_Value2 successful for param %s with value %s\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM,
-            pParamValue));
-        snprintf(cBaseParam, sizeof(cBaseParam), "%s",pParamValue);
-        ((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc((char *)pParamValue);
-    }
 
     snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
     setParamInDhcpMgr(cParamName, "true", BOOLEAN_PARAM);
@@ -126,5 +181,116 @@ void enableDhcpv4ForMta(const char * pIfaceName)
     snprintf(cParamName, sizeof(cParamName), "%s.Interface", cBaseParam);
     setParamInDhcpMgr(cParamName, pIfaceName, STRING_PARAM);
 }
+/**
+ * @brief DHCP client events handler for MTA interface.
+ *
+ * This function handles DHCP client events received via RBUS for the
+ * MTA interface. It processes events related to DHCPv4 and DHCPv6
+ * clients, extracts relevant information, and logs the details.
+ *
+ * @param[in] voiceRbusHandle  RBUS handle used for event handling.
+ * @param[in] pRbusEvent       Pointer to the received RBUS event.
+ * @param[in] pRbusSubscription Pointer to the RBUS event subscription.
+ */
+static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t const* pRbusEvent, rbusEventSubscription_t* pRbusSubscription)
+{
+    (void)voiceRbusHandle;
+    (void)pRbusSubscription;
+    if (pRbusEvent == NULL)
+    {
+        CcspTraceError(("%s: Received NULL event\n", __FUNCTION__));
+        return;
+    }
+    CcspTraceInfo(("%s: Received event %s\n", __FUNCTION__, pRbusEvent->name));
+    DhcpEventData_t sDhcpEvtData = {0};
 
-//void subscribeDhcpClientEvents()
+    if(strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) || strstr(pRbusEvent->name, DHCP_MGR_DHCPv6_TABLE))
+    {
+        sDhcpEvtData.dhcpVersion = strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) ? DHCP_IPv4 : DHCP_IPv6;
+        rbusValue_t rbusValue = rbusObject_GetValue(pRbusEvent->data, "Ifname");
+        snprintf(sDhcpEvtData.cIfaceName, sizeof(sDhcpEvtData.cIfaceName), "%s", rbusValue_GetString(rbusValue, NULL));
+        CcspTraceInfo(("%s: DHCP %s event for interface %s\n", __FUNCTION__,
+            (sDhcpEvtData.dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", sDhcpEvtData.cIfaceName));
+
+        rbusValue = rbusObject_GetValue(pRbusEvent->data, "MsgType");
+        sDhcpEvtData.dhcpMsgType = (DHCP_MESSAGE_TYPE)rbusValue_GetUInt32(rbusValue);
+        CcspTraceInfo(("%s: DHCP Message Type %d\n", __FUNCTION__, sDhcpEvtData.dhcpMsgType));
+
+        if (DHCP_LEASE_UPDATE == sDhcpEvtData.dhcpMsgType)
+        {
+            int iByteLen = 0;
+            rbusValue = rbusObject_GetValue(pRbusEvent->data, "LeaseInfo");
+            const uint8_t* pLeaseInfo = rbusValue_GetBytes(rbusValue, &iByteLen);
+            if (pLeaseInfo != NULL && iByteLen > 0)
+            {
+                if (DHCP_IPv4 == sDhcpEvtData.dhcpVersion)
+                {
+                    if (sizeof(DHCP_MGR_IPV4_MSG) == iByteLen)
+                    {
+                        memcpy(&sDhcpEvtData.leaseInfo.dhcpV4Msg, pLeaseInfo, sizeof(DHCP_MGR_IPV4_MSG));
+                        CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - Ifname: %s, Address: %s, Netmask: %s, Gateway: %s\n",
+                            __FUNCTION__, __LINE__,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.ifname,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.address,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.netmask,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.gateway));
+                        CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - DNS Server: %s, DNS Server1: %s, TimeZone: %s\n",
+                            __FUNCTION__, __LINE__,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.dnsServer,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.dnsServer1,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.timeZone));
+                        CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - MTU Size: %u, Time Offset: %d, IsTimeOffsetAssigned: %d\n",
+                            __FUNCTION__, __LINE__,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.mtuSize,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.timeOffset,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.isTimeOffsetAssigned));
+                        CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - Upstream Rate: %u, Downstream Rate: %u\n",
+                            __FUNCTION__, __LINE__,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.upstreamCurrRate,
+                            sDhcpEvtData.leaseInfo.dhcpV4Msg.downstreamCurrRate));
+                    }
+                    else
+                    {
+                        CcspTraceError(("%s: Invalid DHCPv4 LeaseInfo size %d\n", __FUNCTION__, iByteLen));
+                    }
+                }
+            }
+            else
+            {
+                CcspTraceError(("%s: NULL or empty LeaseInfo in DHCP event\n", __FUNCTION__));
+            }
+        }
+    }
+    else
+    {
+        CcspTraceWarning(("%s: Unrecognized event %s\n", __FUNCTION__, pRbusEvent->name));
+    }
+}
+
+/**
+ * @brief Subscribe to DHCP client events for MTA interface.
+ * This function sets up subscriptions to listen for DHCP client
+ * events related to the MTA interface.
+ */
+
+
+void subscribeDhcpClientEvents(void)
+{
+    if (NULL == voiceRbusHandle)
+    {
+        CcspTraceError(("%s: rbus handle is NULL, cannot subscribe to events\n", __FUNCTION__));
+        return;
+    }
+    char cEventName[64] = {0};
+    rbusError_t rbusRet = RBUS_ERROR_SUCCESS;
+    snprintf(cEventName, sizeof(cEventName), "%s.Events", cBaseParam);
+    rbusRet = rbusEvent_Subscribe(voiceRbusHandle, cEventName, dhcpClientEventsHandler, NULL,60);
+    if (rbusRet != RBUS_ERROR_SUCCESS)
+    {
+        CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, cEventName, rbusRet));
+    }
+    else
+    {
+        CcspTraceInfo(("%s: rbus_event_subscribe successful for event %s\n", __FUNCTION__, cEventName));
+    }
+}

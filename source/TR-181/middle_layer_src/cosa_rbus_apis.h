@@ -17,6 +17,11 @@
  * limitations under the License.
 */
 
+#ifndef COSA_RBUS_APIS_H
+#define COSA_RBUS_APIS_H
+
+#include "ipc_msg.h"
+
 typedef enum
 {
     BOOLEAN_PARAM = 0,      /**< bool true or false */
@@ -24,6 +29,36 @@ typedef enum
     PARAM_NONE
 } paramValueType_t;
 
+typedef enum
+{
+    DHCP_IPv4=0,
+    DHCP_IPv6,
+    DHCP_BOTH,
+    DHCP_NONE
+}DhcpVersion;
+
+typedef struct _DhcpEventData
+{
+    char              cIfaceName[32];
+    DHCP_MESSAGE_TYPE dhcpMsgType;
+    DhcpVersion      dhcpVersion;
+    union
+    {
+        DHCP_MGR_IPV4_MSG dhcpV4Msg;
+        DHCP_MGR_IPV6_MSG dhcpV6Msg;
+    }leaseInfo;
+} DhcpEventData_t;
+/*
+* @brief Retrieve interface index information for the MTA interface.
+ *
+ * This function retrieves Interface index information for the MTA interface
+ * from the PSM (Persistent Storage Manager) and logs the retrieved value.
+ * It reads the parameter "dmsb.voicesupport.Interface.IP.DHCPV4Interface"
+ * from the PSM and stores it in a static variable for later use. If the
+ * retrieval fails, it logs an error message.
+ */
+
+void getIfaceIndexInfo(void);
 /**
  * @brief Initialize the RBUS handle used by this module.
  *
@@ -41,9 +76,18 @@ void initRbusHandle(void);
  * identified by the given interface name. The interface name must be a
  * valid, null-terminated string referring to an existing network
  * interface on the device.
+ * Also it updates the interface name parameter in DHCP manager via RBUS.
  *
  * @param[in] pIfaceName  Name of the MTA network interface for which
  *                        DHCPv4 should be enabled.
  */
 void enableDhcpv4ForMta(const char * pIfaceName);
+
+/**
+ * @brief Subscribe to DHCP client events for MTA interface.
+ * This function sets up subscriptions to listen for DHCP client
+ * events related to the MTA interface.
+ */
+void subscribeDhcpClientEvents(void);
+#endif /* COSA_RBUS_APIS_H */
 

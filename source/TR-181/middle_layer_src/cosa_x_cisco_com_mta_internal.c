@@ -316,6 +316,7 @@ static void createMtaInterface(void)
     syscfg_get(NULL, "VoiceSupport_Mode",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
     if (0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_DUAL_STACK)) {
         CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
+		subscribeDhcpClientEvents();
         enableDhcpv4ForMta(cVoiceSupportIfaceName);
     } else {
         CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
@@ -1562,6 +1563,9 @@ CosaMTAInitialize
 
     //Starting thread to monitor Wan mode and wan status
     CcspTraceInfo(("%s %d Starting sysevent thread \n", __FUNCTION__, __LINE__));
+#if defined(SCXF10)
+    getIfaceIndexInfo();
+#endif
 #ifdef ENABLE_ETH_WAN
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
     pthread_t MtaInit;
