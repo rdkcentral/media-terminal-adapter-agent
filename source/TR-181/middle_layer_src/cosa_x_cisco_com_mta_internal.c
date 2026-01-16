@@ -79,6 +79,7 @@
 #include "syscfg/syscfg.h"
 #if defined (SCXF10)
 #include "cosa_rbus_apis.h"
+#include "cosa_voice_apis.h"
 #endif
 
 #define MAX_BUFF_SIZE 128
@@ -89,10 +90,6 @@
 static int sysevent_fd;
 static token_t sysevent_token;
 
-#if defined (SCXF10)
-#define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
-#define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
-#endif
 /**********************************************************************
 
     caller:     owner of the object
@@ -184,145 +181,6 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
 
 }
 
-#if defined (SCXF10)
-/**
- * @brief Read the EMTA MAC address from the factory NVRAM file.
- *
- * This helper function scans the file "/tmp/factory_nvram.data" for a line
- * beginning with the literal prefix "EMTA " and, if found, copies the
- * remainder of that line (after the prefix and with the trailing newline
- * removed) into the caller-supplied buffer as a null-terminated string.
- *
- * The MAC address format is whatever textual representation is stored in
- * the file (for example, a hex string with or without separators); the
- * string is copied verbatim without validation or normalization.
- *
- * @param[in,out] pMacAddress
- *      Pointer to a character buffer that receives the MAC address string.
- *      The pointer must be non-NULL and reference a buffer of at least
- *      32 bytes, as this function copies the string using strcpy_s with a
- *      destination size of 32 bytes (including the terminating '\0').
- *
- * @note
- *      This function does not return a status; on failure to open or parse
- *      the file, it logs an error via CcspTraceError and leaves the contents
- *      of pMacAddress unchanged or partially unchanged.
- */
-static void readMacAddress (char * pMacAddress)
-{
-	FILE *pFILE = fopen("/tmp/factory_nvram.data", "r");
-	if (pFILE != NULL)
-	{
-		char cLine[128] = {0};
-		while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
-		{
-			if (strncmp(cLine, "EMTA ",5) == 0)
-			{
-				char *pMac = cLine + 5;
-				pMac[strcspn(pMac, "\n")] = 0; // Remove newline character
-				strcpy_s(pMacAddress, 32, pMac);
-				break;
-			}
-		}
-		fclose(pFILE);
-	}
-    else
-    {
-        CcspTraceError(("%s: Failed to open /tmp/factory_nvram.data\n", __FUNCTION__));
-    }
-}
-
-
-/*
- * createMtaInterface
- *
- * Purpose:
- *     Create and configure the MTA (voice) network interface when voice support
- *     is enabled on the device. This helper reads syscfg configuration and,
- *     based on the values retrieved, sets up the logical interface used by the
- *     MTA subsystem.
- *
- * Syscfg dependencies:
- *     - "VoiceSupport_Enabled"
- *         Controls whether voice support is enabled. If this value is not set
- *         or is not "true", the function logs an error and returns without
- *         creating or modifying the MTA interface.
- *
- *     - "VoiceSupport_IfaceName"
- *         Provides the interface name to be used for the MTA (for example,
- *         "mta0"). If this value is not set, the function logs a message and
- *         falls back to the default interface name "mta0".
- *
- *     Additional syscfg values may be consulted (such as parameters related to
- *     DHCPv4 enablement for the MTA interface and the WAN interface name) via
- *     the local buffers declared in this function. These values influence how
- *     the interface is configured but do not change the function’s signature
- *     or return type.
- *
- * Error handling and early return behavior:
- *     - If syscfg indicates that voice support is disabled or unset
- *       ("VoiceSupport_Enabled" is missing or not "true"), the function logs a
- *       diagnostic message via CcspTraceError and returns immediately without
- *       creating the interface.
- *     - If a required configuration value (such as the interface name or
- *       platform-specific MAC address) cannot be obtained or is invalid, the
- *       function may log an error or warning and return early, leaving any
- *       existing interface state unchanged.
- *
- * This function is declared static and returns void; all error reporting is
- * done via logging, and it does not propagate error codes to callers.
- */
-static void createMtaInterface(void)
-{
-    char cVoiceSupportEnabled[8] = {0};
-    char cMtaIfaceDhcpV4Enabled[32] = {0};
-    char cVoiceSupportIfaceName[32] = {0};
-    char cMtaInterfaceMac[32] = {0};
-    char cWanIfname[32] = {0};
-    syscfg_get(NULL, "VoiceSupport_Enabled", cVoiceSupportEnabled, sizeof(cVoiceSupportEnabled));
-    syscfg_get(NULL, "VoiceSupport_IfaceName", cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
-
-    if (cVoiceSupportEnabled[0] == '\0' || strcmp(cVoiceSupportEnabled, "true") != 0) {
-        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
-        return;
-    }
-    if (cVoiceSupportIfaceName[0] == '\0') {
-        CcspTraceError(("%s:%d, VoiceSupport_IfaceName not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
-        strcpy_s(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "mta0");
-    }
-    //Read the mac address from platform_hal_GetMTAMacAddress API once it is implemented
-    readMacAddress(cMtaInterfaceMac);
-    if (strlen(cMtaInterfaceMac) == 0 || cMtaInterfaceMac[0] == '\0') {
-        CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
-        return;
-    }
-    CcspTraceInfo(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceMac));
-    syscfg_get(NULL, "wan_physical_ifname", cWanIfname, sizeof(cWanIfname));
-    CcspTraceInfo(("%s:%d, WAN Physical Ifname is %s\n", __FUNCTION__, __LINE__, cWanIfname));
-    if (cWanIfname[0] == '\0')
-        strcpy_s(cWanIfname, sizeof(cWanIfname), "erouter0");
-
-    //Create the macVlan
-    CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName, cMtaInterfaceMac));
-    char cCmd[2048] = {0};
-    snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, cVoiceSupportIfaceName);
-    system(cCmd);
-    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", cVoiceSupportIfaceName, cMtaInterfaceMac);
-    system(cCmd);
-    snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", cVoiceSupportIfaceName);
-    system(cCmd);
-    CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
-
-    syscfg_get(NULL, "VoiceSupport_Mode",cMtaIfaceDhcpV4Enabled, sizeof(cMtaIfaceDhcpV4Enabled));
-    if (0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_DUAL_STACK)) {
-        CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
-		subscribeDhcpClientEvents();
-        enableDhcpv4ForMta(cVoiceSupportIfaceName);
-    } else {
-        CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cMtaIfaceDhcpV4Enabled, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
-    }
-}
-#endif
 ANSC_STATUS
 CosaMTAInitializeEthWanProvDhcpOption
     (
@@ -1453,8 +1311,7 @@ void * Mta_Sysevent_thread(void *  hThisObject)
              }
              #if defined (SCXF10)
              CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Inteface \n",__FUNCTION__,__LINE__));
-             initRbusHandle();
-             createMtaInterface();
+             startVoiceFeature();
              #endif
          }
 #endif
@@ -1502,8 +1359,7 @@ void * Mta_Sysevent_thread(void *  hThisObject)
                         {
                             #if defined (SCXF10)
                             CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Inteface \n",__FUNCTION__,__LINE__));
-                            initRbusHandle();
-                            createMtaInterface();
+                            startVoiceFeature();
                             #endif
                             if(mtaInEthernetMode != isEthEnabled)
                             {
@@ -1565,6 +1421,7 @@ CosaMTAInitialize
     CcspTraceInfo(("%s %d Starting sysevent thread \n", __FUNCTION__, __LINE__));
 #if defined(SCXF10)
     getIfaceIndexInfo();
+	initRbusHandle();
 #endif
 #ifdef ENABLE_ETH_WAN
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
@@ -1621,6 +1478,34 @@ CosaMTARemove
 
     return returnStatus;
 }
-
+/*
+ *@breif This function get the wan interface name from sysevent
+ *@param pIfname - pointer to store the wan interface name
+ *@param iIfnameLen - length of the pointer
+ *@return ANSC_STATUS_SUCCESS on success else ANSC_STATUS_FAILURE
+*/
+ANSC_STATUS getWanIfaceName(char *pIfname, int iIfnameLen)
+{
+	ANSC_STATUS  returnStatus = ANSC_STATUS_FAILURE;
+	if (!pIfname || iIfnameLen <= 0)
+	{
+		CcspTraceError(("%s: Invalid parameters\n", __FUNCTION__));
+		return returnStatus;
+	}
+    if (sysevent_fd > 0)
+	{
+		if (0 != sysevent_get(sysevent_fd, sysevent_token, "wan_ifname", pIfname, iIfnameLen))
+		{
+			CcspTraceError(("%s: sysevent_get wan_ifname failed\n", __FUNCTION__));
+			returnStatus = ANSC_STATUS_FAILURE;
+		}
+		else
+		{
+			CcspTraceInfo(("%s: sysevent_get wan_ifname=%s\n", __FUNCTION__, pIfname));
+			returnStatus = ANSC_STATUS_SUCCESS;
+		}
+	}
+	return returnStatus;
+}
 
 //#endif

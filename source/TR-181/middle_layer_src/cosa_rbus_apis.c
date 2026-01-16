@@ -20,6 +20,8 @@
 #include "ccsp_trace.h"
 #include "ccsp_psm_helper.h"
 #include "cosa_rbus_apis.h"
+#include "cosa_voice_apis.h"
+
 
 #define  DHCPv4_VOICE_SUPPORT_PARAM "dmsb.voicesupport.Interface.IP.DHCPV4Interface"
 #define  DHCP_MGR_DHCPv4_TABLE "Device.DHCPv4.Client"
@@ -175,11 +177,11 @@ void enableDhcpv4ForMta(const char * pIfaceName)
 {
     char cParamName[64] = {0};
 
-    snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
-    setParamInDhcpMgr(cParamName, "true", BOOLEAN_PARAM);
-
     snprintf(cParamName, sizeof(cParamName), "%s.Interface", cBaseParam);
     setParamInDhcpMgr(cParamName, pIfaceName, STRING_PARAM);
+
+    snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
+    setParamInDhcpMgr(cParamName, "true", BOOLEAN_PARAM);
 }
 /**
  * @brief DHCP client events handler for MTA interface.
@@ -202,52 +204,66 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
         return;
     }
     CcspTraceInfo(("%s: Received event %s\n", __FUNCTION__, pRbusEvent->name));
-    DhcpEventData_t sDhcpEvtData = {0};
+
+    pthread_t dhcpEventThreadId = -1;
 
     if(strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) || strstr(pRbusEvent->name, DHCP_MGR_DHCPv6_TABLE))
     {
-        sDhcpEvtData.dhcpVersion = strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) ? DHCP_IPv4 : DHCP_IPv6;
+        DhcpEventData_t *pDhcpEvtData = (DhcpEventData_t *)malloc(sizeof(DhcpEventData_t));
+        if (pDhcpEvtData == NULL)
+        {
+            CcspTraceError(("%s: Memory allocation failed for DhcpEventData_t\n", __FUNCTION__));
+            return;
+        }
+        memset(pDhcpEvtData, 0, sizeof(DhcpEventData_t));
+        pDhcpEvtData->dhcpVersion = strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) ? DHCP_IPv4 : DHCP_IPv6;
         rbusValue_t rbusValue = rbusObject_GetValue(pRbusEvent->data, "Ifname");
-        snprintf(sDhcpEvtData.cIfaceName, sizeof(sDhcpEvtData.cIfaceName), "%s", rbusValue_GetString(rbusValue, NULL));
+        snprintf(pDhcpEvtData->cIfaceName, sizeof(pDhcpEvtData->cIfaceName), "%s", rbusValue_GetString(rbusValue, NULL));
         CcspTraceInfo(("%s: DHCP %s event for interface %s\n", __FUNCTION__,
-            (sDhcpEvtData.dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", sDhcpEvtData.cIfaceName));
+            (pDhcpEvtData->dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", pDhcpEvtData->cIfaceName));
 
+        if (NULL == pDhcpEvtData->cIfaceName || strlen(pDhcpEvtData->cIfaceName) == 0)
+        {
+            CcspTraceError(("%s: Invalid interface name in DHCP event\n", __FUNCTION__));
+            free(pDhcpEvtData);
+            return;
+        }
         rbusValue = rbusObject_GetValue(pRbusEvent->data, "MsgType");
-        sDhcpEvtData.dhcpMsgType = (DHCP_MESSAGE_TYPE)rbusValue_GetUInt32(rbusValue);
-        CcspTraceInfo(("%s: DHCP Message Type %d\n", __FUNCTION__, sDhcpEvtData.dhcpMsgType));
+        pDhcpEvtData->dhcpMsgType = (DHCP_MESSAGE_TYPE)rbusValue_GetUInt32(rbusValue);
+        CcspTraceInfo(("%s: DHCP Message Type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
 
-        if (DHCP_LEASE_UPDATE == sDhcpEvtData.dhcpMsgType)
+        if (DHCP_LEASE_UPDATE == pDhcpEvtData->dhcpMsgType)
         {
             int iByteLen = 0;
             rbusValue = rbusObject_GetValue(pRbusEvent->data, "LeaseInfo");
             const uint8_t* pLeaseInfo = rbusValue_GetBytes(rbusValue, &iByteLen);
             if (pLeaseInfo != NULL && iByteLen > 0)
             {
-                if (DHCP_IPv4 == sDhcpEvtData.dhcpVersion)
+                if (DHCP_IPv4 == pDhcpEvtData->dhcpVersion)
                 {
                     if (sizeof(DHCP_MGR_IPV4_MSG) == iByteLen)
                     {
-                        memcpy(&sDhcpEvtData.leaseInfo.dhcpV4Msg, pLeaseInfo, sizeof(DHCP_MGR_IPV4_MSG));
+                        memcpy(&pDhcpEvtData->leaseInfo.dhcpV4Msg, pLeaseInfo, sizeof(DHCP_MGR_IPV4_MSG));
                         CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - Ifname: %s, Address: %s, Netmask: %s, Gateway: %s\n",
                             __FUNCTION__, __LINE__,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.ifname,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.address,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.netmask,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.gateway));
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.ifname,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.address,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway));
                         CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - DNS Server: %s, DNS Server1: %s, TimeZone: %s\n",
                             __FUNCTION__, __LINE__,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.dnsServer,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.dnsServer1,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.timeZone));
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer1,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.timeZone));
                         CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - MTU Size: %u, Time Offset: %d, IsTimeOffsetAssigned: %d\n",
                             __FUNCTION__, __LINE__,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.mtuSize,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.timeOffset,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.isTimeOffsetAssigned));
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.mtuSize,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.timeOffset,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.isTimeOffsetAssigned));
                         CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - Upstream Rate: %u, Downstream Rate: %u\n",
                             __FUNCTION__, __LINE__,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.upstreamCurrRate,
-                            sDhcpEvtData.leaseInfo.dhcpV4Msg.downstreamCurrRate));
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.upstreamCurrRate,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.downstreamCurrRate));
                     }
                     else
                     {
@@ -260,6 +276,13 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
                 CcspTraceError(("%s: NULL or empty LeaseInfo in DHCP event\n", __FUNCTION__));
             }
         }
+        if (pthread_create(&dhcpEventThreadId, NULL, dhcpClientEventsHandlerThread, (void *)pDhcpEvtData) != 0)
+        {
+            CcspTraceError(("%s: Failed to create DHCP event processing thread\n", __FUNCTION__));
+            free(pDhcpEvtData);
+            return;
+        }
+        usleep(10000); // Sleep for 10ms to allow thread to start
     }
     else
     {
@@ -273,7 +296,6 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
  * events related to the MTA interface.
  */
 
-
 void subscribeDhcpClientEvents(void)
 {
     if (NULL == voiceRbusHandle)
@@ -284,7 +306,20 @@ void subscribeDhcpClientEvents(void)
     char cEventName[64] = {0};
     rbusError_t rbusRet = RBUS_ERROR_SUCCESS;
     snprintf(cEventName, sizeof(cEventName), "%s.Events", cBaseParam);
-    rbusRet = rbusEvent_Subscribe(voiceRbusHandle, cEventName, dhcpClientEventsHandler, NULL,60);
+
+    rbusEventSubscription_t rbusEventSubscription = {
+        .eventName = cEventName,
+        .filter = NULL,
+        .interval = 0,
+        .duration = 0,
+        .handler = dhcpClientEventsHandler,
+        .userData = NULL,
+        .handle = NULL,
+        .asyncHandler = NULL,
+        .publishOnSubscribe = true
+    };
+
+    rbusRet = rbusEvent_SubscribeEx (voiceRbusHandle, &rbusEventSubscription, 1, 0);
     if (rbusRet != RBUS_ERROR_SUCCESS)
     {
         CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, cEventName, rbusRet));
