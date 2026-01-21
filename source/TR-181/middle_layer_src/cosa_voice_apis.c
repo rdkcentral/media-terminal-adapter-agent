@@ -20,6 +20,7 @@
 #include "ccsp_psm_helper.h"
 #include "cosa_x_cisco_com_mta_internal.h"
 #include "cosa_rbus_apis.h"
+#include "voice_dhcp_hal.h"
 #include "syscfg/syscfg.h"
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -272,6 +273,10 @@ void startVoiceFeature(void)
         isVoiceFeatureStarted = true;
     }
 }
+/*
+ *@brief Add IP route details for the MTA interface based on DHCP event data
+ *@param pDhcpEvtData - Pointer to the DHCP event data structure
+*/
 static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
 {
     if (NULL == pDhcpEvtData)
@@ -279,17 +284,124 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
         CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
         return;
     }
-#if 0
-    char cParamName[128] = {0};
-    snprintf(cParamName, sizeof(cParamName), "ip route add %s dev %s", pDhcpEvtData->routeDest, pDhcpEvtData->ifName);
+    CcspTraceInfo(("%s:%d, Adding IP route details for interface %s\n", __FUNCTION__, __LINE__, pDhcpEvtData->cIfaceName));
+    CcspTraceInfo(("%s:%d, Gateway address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway));
+    CcspTraceInfo(("%s:%d, TFTP server address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer));
+    CcspTraceInfo(("%s:%d, MTA IP address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.address));
 
-ip route add 21.242.78.1 dev "$mta_interface_name" # Gateway Address
-ip route add 96.106.45.210 via 21.242.78.1 dev "$mta_interface_name"  # tftpserver
-ip rule add from 21.242.78.16 table 21 # mta ip address
-ip route add 21.242.78.0/32 dev mta0 table 21 
-ip route add default via 21.242.78.1 dev mta0 table 21 
-#endif
+
+    char cParamName[256] = {0};
+    struct in_addr ipAddr = {0}, netMask = {0}, networkAddr = {0};
+
+    inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, &ipAddr);
+    inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, &netMask);
+    networkAddr.s_addr = ipAddr.s_addr & netMask.s_addr;
+
+    char cNetworkAddr[32] = {0};
+    char cNetworkAddrWithCidr[64] = {0};
+    inet_ntop(AF_INET, &networkAddr, cNetworkAddr, sizeof(cNetworkAddr));
+    //Calulate CIDR notation
+    CcspTraceInfo(("%s:%d, Network Address:%s\n",__FUNCTION__,__LINE__,cNetworkAddr));
+    snprintf(cNetworkAddrWithCidr, sizeof(cNetworkAddrWithCidr), "%s/%d", cNetworkAddr, __builtin_popcount(ntohl(netMask.s_addr)));
+    CcspTraceInfo(("%s:%d, Network Address in CIDR notation:%s\n",__FUNCTION__,__LINE__,cNetworkAddrWithCidr));
+
+    snprintf(cParamName, sizeof(cParamName), "ip route add %s dev %s", pDhcpEvtData->leaseInfo.dhcpV4Msg.address, pDhcpEvtData->cIfaceName);
+    system(cParamName);
+    snprintf(cParamName, sizeof(cParamName), "ip route add %s via %s dev %s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer, pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, pDhcpEvtData->cIfaceName);
+    system(cParamName);
+    snprintf(cParamName, sizeof(cParamName), "ip rule add from %s table 21", pDhcpEvtData->leaseInfo.dhcpV4Msg.address);
+    system(cParamName);
+    snprintf(cParamName, sizeof(cParamName), "ip route add %s dev %s table 21", cNetworkAddrWithCidr, pDhcpEvtData->cIfaceName);
+    system(cParamName);
+    snprintf(cParamName, sizeof(cParamName), "ip route add default via %s dev %s table 21", pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, pDhcpEvtData->cIfaceName);
+    system(cParamName);
 }
+
+#if 0 // Checking with broadcom team regarding Option122 support. Currently if we pass null then it is proceding further.
+/*
+ *@brief Convert a hexadecimal string to a byte array.
+ * This helper function takes a hexadecimal string representation and converts it
+ * into its corresponding byte array.
+ * @param[in] pHexString
+ *      Pointer to a null-terminated string containing the hexadecimal representation.
+ * @param[out] pByteArray
+ *      Pointer to a byte array that will receive the converted bytes.
+ * @param[in] iByteArrayLen
+ *      Length of the byte array to be filled.
+*/
+void hexStringToByteArray(const char* pHexString, uint8_t* pByteArray, int iByteArrayLen)
+{
+    if (NULL == pHexString || NULL == pByteArray || iByteArrayLen <= 0)
+    {
+        CcspTraceError(("%s: NULL parameters are passed \n", __FUNCTION__));
+        return;
+    }
+
+    int iHexStringLen = strlen(pHexString);
+    for (int iIndex = 0; iIndex < iByteArrayLen && (iIndex * 2 + 1) < iHexStringLen; iIndex++)
+    {
+        sscanf(&pHexString[iIndex * 2], "%2hhx", &pByteArray[iIndex]);
+    }
+}
+/*
+ * @brief Extract a specific sub-option from DHCP Option 122 data.
+ *
+ * This helper function parses the provided DHCP Option 122 data to find
+ * and extract the value of a specified sub-option.
+ *
+ * @param[in] pOption122Data
+ *      Pointer to the raw DHCP Option 122 data buffer.
+ * @param[in] iOption122Len
+ *      Length of the DHCP Option 122 data buffer.
+ * @param[in] ui8WantedSubOption
+ *      The sub-option number to extract.
+ * @param[out] pOutputVal
+ *      Pointer to a variable that will receive a pointer to the extracted
+ *      sub-option value within the original buffer.
+ * @param[out] pOutputValLen
+ *      Pointer to a variable that will receive the length of the extracted
+ *      sub-option value.
+ *
+ * @return
+ *      Returns 0 on success, -1 if the sub-option is not found or on error.
+*/
+static int getOption122_SubOptions(uint8_t *pOption122Data, uint16_t iOption122Len, uint8_t ui8WantedSubOption, uint8_t **pOutputVal, uint8_t *pOutputValLen)
+{
+    if (NULL == pOption122Data || iOption122Len == 0 || NULL == pOutputVal || NULL == pOutputValLen)
+    {
+        CcspTraceError(("%s: NULL parameters are passed \n", __FUNCTION__));
+        return -1;
+    }
+
+    uint16_t ui16Position = 0;
+    while(ui16Position + 2 <= iOption122Len)
+    {
+        uint8_t ui8SubOption = pOption122Data[ui16Position];
+        uint8_t ui8SubOptionLen = pOption122Data[ui16Position + 1];
+
+        if (ui16Position + 2 + ui8SubOptionLen > iOption122Len)
+        {
+            CcspTraceError(("%s: Malformed Option 122 data\n", __FUNCTION__));
+            return -1;
+        }
+
+        if (ui8SubOption == ui8WantedSubOption)
+        {
+            *pOutputVal = &pOption122Data[ui16Position + 2];
+            *pOutputValLen = ui8SubOptionLen;
+            return 0;
+        }
+
+        ui16Position += 2 + ui8SubOptionLen;
+    }
+    return -1; // Sub-option not found
+}
+#endif
+/*
+ *@breif This function initializes the voice support related parameters based on DHCP event data
+ *@param pDhcpEvtData - Pointer to the DHCP event data structure
+*/
+
 static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
 {
     if (NULL == pDhcpEvtData)
@@ -327,6 +439,74 @@ typedef struct
   char    v6ClientFqdn[VOICE_STRMAX_128];           /* opt 39 (decoded FQDN) */
 } VoiceInterfaceInfoType;
 #endif
+    VoiceInterfaceInfoType sVoiceInterfaceInfoType = {0};
+    snprintf(sVoiceInterfaceInfoType.intfName, sizeof(sVoiceInterfaceInfoType.intfName), "%s", pDhcpEvtData->cIfaceName);
+    sVoiceInterfaceInfoType.isPhyUp = 1;
+    sVoiceInterfaceInfoType.isIpv4Up = 1;
+    strncpy(sVoiceInterfaceInfoType.ipv4Addr, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, sizeof(sVoiceInterfaceInfoType.ipv4Addr)-1);
+    strncpy(sVoiceInterfaceInfoType.v4NextServerIp, pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer, sizeof(sVoiceInterfaceInfoType.v4NextServerIp)-1);
+    strncpy(sVoiceInterfaceInfoType.v4BootFileName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption67, sizeof(sVoiceInterfaceInfoType.v4BootFileName)-1);
+
+    char cTmpDnsServers[VOICE_IPV4_ADDR_LEN*4] = {0};
+    int iBufSize = sizeof(cTmpDnsServers);
+    int iLen = 0;
+    strncpy(cTmpDnsServers, pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer, iBufSize-1);
+    cTmpDnsServers[iBufSize -1] = '\0';
+    iLen = strlen(cTmpDnsServers);
+    if (iLen < (iBufSize -1) && strlen(pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer1) > 0)
+    {
+        if (iLen > 0)
+        {
+            strncat(cTmpDnsServers, ",", iBufSize - strlen(cTmpDnsServers) -1);
+        }
+        strncat(cTmpDnsServers, pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer1, iBufSize - strlen(cTmpDnsServers) -1);
+    }
+
+    strncpy(sVoiceInterfaceInfoType.v4DnsServers, cTmpDnsServers, sizeof(sVoiceInterfaceInfoType.v4DnsServers)-1);
+    strncpy(sVoiceInterfaceInfoType.v4HostName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName, sizeof(sVoiceInterfaceInfoType.v4HostName)-1);
+    strncpy(sVoiceInterfaceInfoType.v4DomainName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName, sizeof(sVoiceInterfaceInfoType.v4DomainName)-1);
+    strncpy(sVoiceInterfaceInfoType.v4LogServerIp, "(null)", sizeof(sVoiceInterfaceInfoType.v4LogServerIp)-1);
+    strncpy(sVoiceInterfaceInfoType.v4ServerHostName, "(null)", sizeof(sVoiceInterfaceInfoType.v4ServerHostName)-1);
+    #if 0 // Checking with broadcom team regarding Option122 support. Currently if we pass null then it is proceding further.
+    //Retrieve Option122 SubOption 3 for Provisioning Server
+    uint8_t *pSubOptData = NULL;
+    uint8_t ui8SubOptionLen = 0;
+    const char *pHexOption122Data = pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption122;
+    uint16_t iOption122Len = strlen(pHexOption122Data) / 2;
+    uint8_t ui8Option122Data[iOption122Len];
+    memset(ui8Option122Data, 0, sizeof(ui8Option122Data));
+    hexStringToByteArray(pHexOption122Data, ui8Option122Data, iOption122Len);
+
+    CcspTraceInfo(("%s:%d, Option122 Data: %s\n", __FUNCTION__, __LINE__, pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption122));
+    if (0 == getOption122_SubOptions(ui8Option122Data,
+                                    iOption122Len,
+                                    3,
+                                    &pSubOptData,
+                                    &ui8SubOptionLen))
+    {
+        int iCopyLen = (ui8SubOptionLen < sizeof(sVoiceInterfaceInfoType.v4ProvServer)-1) ? ui8SubOptionLen : (sizeof(sVoiceInterfaceInfoType.v4ProvServer)-1);
+        memcpy(sVoiceInterfaceInfoType.v4ProvServer, pSubOptData, iCopyLen);
+        sVoiceInterfaceInfoType.v4ProvServer[iCopyLen] = '\0';
+        CcspTraceInfo(("%s:%d, Retrieved Option122 SubOption 3 for Provisioning Server: %s and len:%u\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ProvServer, ui8SubOptionLen));
+    }
+    else {
+        CcspTraceError(("%s: Failed to get Option122 SubOption 3 for Provisioning Server\n", __FUNCTION__));
+    }
+    #endif
+    strncpy(sVoiceInterfaceInfoType.v4ProvServer, "(null)", sizeof(sVoiceInterfaceInfoType.v4ProvServer)-1);
+    CcspTraceInfo(("%s:%d, Initializing Voice Support with following details:\n", __FUNCTION__, __LINE__));
+    CcspTraceInfo(("%s:%d, Interface Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.intfName));
+    CcspTraceInfo(("%s:%d, IPv4 Address: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.ipv4Addr));
+    CcspTraceInfo(("%s:%d, Next Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4NextServerIp));
+    CcspTraceInfo(("%s:%d, Boot File Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4BootFileName));
+    CcspTraceInfo(("%s:%d, DNS Servers: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4DnsServers));
+    CcspTraceInfo(("%s:%d, Host Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4HostName));
+    CcspTraceInfo(("%s:%d, Domain Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4DomainName));
+    CcspTraceInfo(("%s:%d, Provisioning Server: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ProvServer));
+    CcspTraceInfo(("%s:%d, Log Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4LogServerIp));
+    CcspTraceInfo(("%s:%d, Server Host Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ServerHostName));
+
+    voice_hal_interface_info_notify(&sVoiceInterfaceInfoType);
 }
 
 
@@ -373,6 +553,7 @@ void * dhcpClientEventsHandlerThread(void * pArg)
             case DHCP_LEASE_RENEW:
             case DHCP_LEASE_DEL:
             case DHCP_LEASE_UPDATE:
+            case DHCP_CLIENT_FAILED:
             {
                 processVoiceDhcpEvent((DhcpEventData_t *)pDhcpEvtData);
                 break;

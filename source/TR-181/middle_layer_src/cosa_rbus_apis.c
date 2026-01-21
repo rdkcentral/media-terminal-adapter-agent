@@ -217,22 +217,24 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
         }
         memset(pDhcpEvtData, 0, sizeof(DhcpEventData_t));
         pDhcpEvtData->dhcpVersion = strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) ? DHCP_IPv4 : DHCP_IPv6;
-        rbusValue_t rbusValue = rbusObject_GetValue(pRbusEvent->data, "Ifname");
-        snprintf(pDhcpEvtData->cIfaceName, sizeof(pDhcpEvtData->cIfaceName), "%s", rbusValue_GetString(rbusValue, NULL));
-        CcspTraceInfo(("%s: DHCP %s event for interface %s\n", __FUNCTION__,
-            (pDhcpEvtData->dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", pDhcpEvtData->cIfaceName));
-
-        if (NULL == pDhcpEvtData->cIfaceName || strlen(pDhcpEvtData->cIfaceName) == 0)
+        rbusValue_t rbusValue = rbusObject_GetValue(pRbusEvent->data, "IfName");
+        const char *pIfaceName = rbusValue_GetString(rbusValue, NULL);
+        if (NULL == pIfaceName || strlen(pIfaceName) == 0)
         {
             CcspTraceError(("%s: Invalid interface name in DHCP event\n", __FUNCTION__));
             free(pDhcpEvtData);
             return;
         }
+        snprintf(pDhcpEvtData->cIfaceName, sizeof(pDhcpEvtData->cIfaceName), "%s", pIfaceName);
+        CcspTraceInfo(("%s: DHCP %s event for interface %s\n", __FUNCTION__,
+            (pDhcpEvtData->dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", pDhcpEvtData->cIfaceName));
+
         rbusValue = rbusObject_GetValue(pRbusEvent->data, "MsgType");
         pDhcpEvtData->dhcpMsgType = (DHCP_MESSAGE_TYPE)rbusValue_GetUInt32(rbusValue);
         CcspTraceInfo(("%s: DHCP Message Type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
 
-        if (DHCP_LEASE_UPDATE == pDhcpEvtData->dhcpMsgType)
+        if (DHCP_LEASE_UPDATE == pDhcpEvtData->dhcpMsgType || DHCP_LEASE_RENEW == pDhcpEvtData->dhcpMsgType || DHCP_LEASE_DEL == pDhcpEvtData->dhcpMsgType || \
+            DHCP_CLIENT_STARTED == pDhcpEvtData->dhcpMsgType || DHCP_CLIENT_STOPPED == pDhcpEvtData->dhcpMsgType || DHCP_CLIENT_FAILED == pDhcpEvtData->dhcpMsgType)
         {
             int iByteLen = 0;
             rbusValue = rbusObject_GetValue(pRbusEvent->data, "LeaseInfo");
@@ -241,6 +243,8 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
             {
                 if (DHCP_IPv4 == pDhcpEvtData->dhcpVersion)
                 {
+                    CcspTraceInfo(("%s: Processing DHCPv4 LeaseInfo of size %d\n", __FUNCTION__, iByteLen));
+                    CcspTraceInfo(("%s:%d, DHCP_MGR_IPV4_MSG size: %ld\n", __FUNCTION__, __LINE__, sizeof(DHCP_MGR_IPV4_MSG)));
                     if (sizeof(DHCP_MGR_IPV4_MSG) == iByteLen)
                     {
                         memcpy(&pDhcpEvtData->leaseInfo.dhcpV4Msg, pLeaseInfo, sizeof(DHCP_MGR_IPV4_MSG));
@@ -264,6 +268,15 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
                             __FUNCTION__, __LINE__,
                             pDhcpEvtData->leaseInfo.dhcpV4Msg.upstreamCurrRate,
                             pDhcpEvtData->leaseInfo.dhcpV4Msg.downstreamCurrRate));
+                        CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - MTA Option 122: %s, MTA Option 67: %s, TFTP Server: %s\n",
+                            __FUNCTION__, __LINE__,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption122,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption67,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer));
+                        CcspTraceInfo(("%s:%d, DHCPv4 Lease Info - HostName: %s, DomainName: %s\n",
+                            __FUNCTION__, __LINE__,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName,
+                            pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName));
                     }
                     else
                     {
@@ -275,6 +288,12 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
             {
                 CcspTraceError(("%s: NULL or empty LeaseInfo in DHCP event\n", __FUNCTION__));
             }
+        }
+        else
+        {
+            CcspTraceInfo(("%s: No LeaseInfo for DHCP Message Type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
+            free(pDhcpEvtData);
+            return;
         }
         if (pthread_create(&dhcpEventThreadId, NULL, dhcpClientEventsHandlerThread, (void *)pDhcpEvtData) != 0)
         {

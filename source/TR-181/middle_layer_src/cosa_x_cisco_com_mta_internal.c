@@ -1427,8 +1427,10 @@ CosaMTAInitialize
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
     pthread_t MtaInit;
 #if defined (EROUTER_DHCP_OPTION_MTA)
+    CcspTraceInfo(("%s %d Starting sysevent thread for DHCP option 122/2171 \n", __FUNCTION__, __LINE__));
     pthread_create(&MtaInit, NULL, &Mta_Sysevent_thread_Dhcp_Option, (ANSC_HANDLE) hThisObject);
 #else
+    CcspTraceInfo(("%s %d Starting sysevent thread for WAN state \n", __FUNCTION__, __LINE__));
     pthread_create(&MtaInit, NULL, &Mta_Sysevent_thread, (ANSC_HANDLE) hThisObject);
 #endif
     //  CosaMTAInitializeEthWanProv(hThisObject);
