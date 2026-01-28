@@ -287,6 +287,8 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
             else
             {
                 CcspTraceError(("%s: NULL or empty LeaseInfo in DHCP event\n", __FUNCTION__));
+                free(pDhcpEvtData);
+                return;
             }
         }
         else
