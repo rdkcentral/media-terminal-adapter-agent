@@ -77,6 +77,10 @@
 #include "messagebus_interface_helper.h"
 #include "syscfg/syscfg.h"
 
+#if defined (SCXF10)
+#include "bcm_generic_hal.h"
+#endif
+
 extern ULONG g_currentBsUpdate;
 
 #define MAX_LINE_REG 256
@@ -8236,3 +8240,248 @@ X_RDKCENTRAL_COM_MTA_SetParamBoolValue
 	
 	return FALSE;
 }
+
+#if defined (SCXF10)
+static ULONG getParamString
+    (
+        char *fullpath,
+        char *pValue,
+        ULONG *pUlSize
+    )
+{
+   ULONG ret = -1;
+   BcmRet rc;
+   char *nameArray[1] = { fullpath };
+   BcmGenericParamInfo *getParamInfoArray = NULL;
+   UINT32 numParamInfo = 0;
+
+   rc = bcm_generic_getParameterValues((const char **)nameArray, 1, FALSE, 0,
+                                       &getParamInfoArray, &numParamInfo);
+   if (BCMRET_SUCCESS == rc)
+   {
+      if (1 == numParamInfo)
+      {
+         /* collect value */
+         if ( _ansc_strlen(getParamInfoArray[0].value) >= *pUlSize )
+         {
+             *pUlSize = _ansc_strlen(getParamInfoArray[0].value);
+             ret = 1;
+         }
+         else
+         {
+            AnscCopyString(pValue, getParamInfoArray[0].value);
+            ret = 0;
+         }
+      }
+
+      bcm_generic_freeParamInfoArray(&getParamInfoArray, numParamInfo);
+   }
+   else
+   {
+      AnscTraceError(("getParamString: bcm_generic_getParameterValues failed for %s\n",
+                      fullpath));
+   }
+
+   return ret;
+}
+
+static BOOL setParamString
+    (
+        char *fullpath,
+        char *pString
+    )
+{
+   BcmRet rc;
+   BcmGenericParamInfo setParamInfoArray[1] = { 0 };
+
+   /* Fill config structure */
+   setParamInfoArray[0].fullpath = fullpath;
+   setParamInfoArray[0].type = "string";
+   setParamInfoArray[0].value = pString;
+
+   // Set value(s).
+   rc = bcm_generic_setParameterValues(setParamInfoArray, 1, 0);
+   if (BCMRET_SUCCESS != rc)
+   {
+      AnscTraceError(("setParamString: bcm_generic_setParameterValues failed for %s\n",
+                      fullpath));
+      return FALSE;
+   }
+
+   return TRUE;
+}
+
+ULONG
+BrcmVoiceService_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+   ULONG ret = -1;
+
+   if( AnscEqualString(ParamName, "X_BROADCOM_COM_BoundIfName", TRUE)
+       || AnscEqualString(ParamName, "X_BROADCOM_COM_ModuleLogLevels", TRUE)
+     )
+   {
+      char fullpath[256] = { 0 };
+
+      snprintf(fullpath, sizeof(fullpath), "Device.Services.VoiceService.1.%s", ParamName);
+
+      ret = getParamString(fullpath, pValue, pUlSize);
+   }
+
+   return ret;
+}
+
+BOOL
+BrcmVoiceService_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+
+   if( AnscEqualString(ParamName, "X_BROADCOM_COM_BoundIfName", TRUE)
+       || AnscEqualString(ParamName, "X_BROADCOM_COM_ModuleLogLevels", TRUE)
+     )
+   {
+      char fullpath[256] = { 0 };
+
+      snprintf(fullpath, sizeof(fullpath), "Device.Services.VoiceService.1.%s", ParamName);
+
+      return setParamString(fullpath, pString);
+   }
+
+   return FALSE;
+}
+
+ULONG
+BrcmVoiceNetwork_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+
+   ULONG ret = -1;
+
+   if( AnscEqualString(ParamName, "ProxyServer", TRUE)
+       || AnscEqualString(ParamName, "RegistrarServer", TRUE)
+     )
+   {
+      char fullpath[256] = { 0 };
+
+      snprintf(fullpath, sizeof(fullpath), "Device.Services.VoiceService.1.SIP.Network.1.%s", ParamName);
+
+      ret = getParamString(fullpath, pValue, pUlSize);
+   }
+
+   return ret;
+}
+
+BOOL
+BrcmVoiceNetwork_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+
+   if( AnscEqualString(ParamName, "ProxyServer", TRUE)
+       || AnscEqualString(ParamName, "RegistrarServer", TRUE)
+     )
+   {
+      char fullpath[256] = { 0 };
+
+      snprintf(fullpath, sizeof(fullpath), "Device.Services.VoiceService.1.SIP.Network.1.%s", ParamName);
+
+      return setParamString(fullpath, pString);
+   }
+
+   return FALSE;
+}
+
+ULONG
+BrcmVoiceClient_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+
+   ULONG ret = -1;
+
+   if( AnscEqualString(ParamName, "RegisterURI", TRUE)
+       || AnscEqualString(ParamName, "AuthUserName", TRUE)
+       || AnscEqualString(ParamName, "AuthPassword", TRUE)
+     )
+   {
+      char fullpath[256] = { 0 };
+
+      snprintf(fullpath, sizeof(fullpath), "Device.Services.VoiceService.1.SIP.Client.1.%s", ParamName);
+
+      ret = getParamString(fullpath, pValue, pUlSize);
+   }
+
+   return ret;
+}
+
+BOOL
+BrcmVoiceClient_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+
+   if( AnscEqualString(ParamName, "RegisterURI", TRUE)
+       || AnscEqualString(ParamName, "AuthUserName", TRUE)
+       || AnscEqualString(ParamName, "AuthPassword", TRUE)
+     )
+   {
+      char fullpath[256] = { 0 };
+
+      snprintf(fullpath, sizeof(fullpath), "Device.Services.VoiceService.1.SIP.Client.1.%s", ParamName);
+
+      return setParamString(fullpath, pString);
+   }
+
+   return FALSE;
+}
+
+BOOL
+BrcmVoiceService_NotifyIfIp_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   )
+{
+   UNREFERENCED_PARAMETER(hInsContext);
+
+   if( AnscEqualString(ParamName, "X_BROADCOM_COM_NotifyIfIp", TRUE) )
+   {
+      CosaDmlNotifyIf(pString);
+
+      return TRUE;
+   }
+
+   return FALSE;
+}
+#endif

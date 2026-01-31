@@ -417,6 +417,69 @@ X_RDKCENTRAL_COM_MTA_SetParamBoolValue
         BOOL                       bValue
     );
 int CosaDmlTR104DataSet(char* pString,int bootup);
+
+#if defined (SCXF10)
+ULONG
+BrcmVoiceService_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    );
+
+BOOL
+BrcmVoiceService_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   );
+
+ULONG
+BrcmVoiceNetwork_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    );
+
+BOOL
+BrcmVoiceNetwork_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   );
+
+ULONG
+BrcmVoiceClient_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    );
+
+BOOL
+BrcmVoiceClient_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   );
+
+BOOL
+BrcmVoiceService_NotifyIfIp_SetParamStringValue
+   (
+       ANSC_HANDLE                 hInsContext,
+       char*                       ParamName,
+       char*                       pString
+   );
+
+
+#endif
 #endif /* _COSA_MTA_DML_H */
 
 // #endif /* CONFIG_TI_PACM */

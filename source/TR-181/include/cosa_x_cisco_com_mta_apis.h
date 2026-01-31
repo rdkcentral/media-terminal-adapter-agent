@@ -328,6 +328,10 @@ typedef enum
 /**********************************************************************
                 FUNCTION PROTOTYPES
 **********************************************************************/
+#if defined (SCXF10)
+void
+CosaDmlNotifyIf(char *pIpAddr);
+#endif
 
 ANSC_STATUS
 CosaDmlMTAInit

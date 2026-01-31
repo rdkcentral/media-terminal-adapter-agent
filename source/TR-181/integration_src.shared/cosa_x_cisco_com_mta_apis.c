@@ -77,6 +77,11 @@
 #include "safec_lib_common.h"
 #include "sysevent/sysevent.h"
 #include "ctype.h"
+#if defined (SCXF10)
+#include "voice_dhcp_hal.h"
+#include "bcm_generic_hal.h"
+#include "dhcp_config_key.h" // for dhcpEncryptCfgFile()
+#endif
 
 
 // #include "cosa_x_cisco_com_mta_internal.h"
@@ -88,6 +93,629 @@
 #define NVRAM_BOOTSTRAP_CLEARED         (1 << 0)
 #define MAX_LINE_REG 256
 
+#if defined (SCXF10)
+#define MAX_STR 256
+#define MAX_DHCP_OPTION_LEN 2048
+static const char *cxcProvDhcpOptionsPrefix = "tmp";
+static const char cxcProvDhcpV4OptionsFilePath[]   = "/%s/udhcpc/%s/option.env";
+static const char cxcProvDhcpV4Option122FilePath[] = "/%s/udhcpc/%s/option122.out";
+static const char cxcProvDhcpV6Option17FilePath[]  = "/%s/udhcp6c/%s/option17.out";
+static const char cxcProvDhcpV6Option23FilePath[]  = "/%s/udhcp6c/%s/option23.out";
+static const char cxcProvDhcpV6Option24FilePath[]  = "/%s/udhcp6c/%s/option24.out";
+static const char cxcProvDhcpV6Option39FilePath[]  = "/%s/udhcp6c/%s/option39.out";
+
+
+/****************************************************************************
+ ** FUNCTION:    parseFqdnFormat
+ **
+ ** PURPOSE:     Parse FQDN format from buffer.
+ **
+ ** PARAMETERS:  buf      (in)   Buffer to read FQDN formatted data
+ **              bufLen   (in)   Length of FQDN formatted data
+ **              fqdn     (out)  FQDN string (NULL terminated)
+ **              fqdnLen  (in)   length of fqdn buffer
+ **
+ ** RETURNS:     None
+ **
+ ****************************************************************************/
+static void parseFqdnFormat(char *buf, int bufLen, char *fqdn, int fqdnLen)
+{
+    int i, subLen = 0;
+    int len = (bufLen <= fqdnLen) ? bufLen : fqdnLen;   /* Use the smaller of the two */
+
+    AnscTraceVerbose(("bufLen(%d), fqdnLen(%d)\n", bufLen, fqdnLen));
+
+    if (!buf || !fqdn)
+    {
+        AnscTraceError(("Invalid input, buf(%p), fqdn(%p)\n", buf, fqdn));
+        return;
+    }
+
+    /* Convert FQDN format to string
+     * FQDN format:
+     *  | len | value | len | value | ...
+     *  eg. my.fqdn.com => 02 6D 79 04 66 71 64 6E 03 63 6F 6D  00
+     *                    |   my   |     fqdn     |    com    | (optional)
+     */
+    for (i = 0; i < len; i++)
+    {
+        if (0 == subLen)
+        {
+            /* Store new length and replace with '.' */
+            subLen = buf[i];
+            if (0 == subLen)
+            {
+                fqdn[i - 1] = '\0';
+            }
+            else
+            {
+                if (i != 0)
+                {
+                    fqdn[i - 1] = '.';
+                }
+            }
+        }
+        else
+        {
+            fqdn[i - 1] = buf[i];
+            subLen--;
+        }
+    }
+    fqdn[i - 1] = '\0';
+}
+
+/****************************************************************************
+ ** FUNCTION:    getSubOptionDHCPv6
+ **
+ ** PURPOSE:     Get any specified sub-option data from DHCPv6 sub-option.
+ **
+ ** PARAMETERS:  subData      (in)   all of sub-option TLV
+ **              subDataLen   (in)   total len of subData
+ **              dstCode      (in)   target sub-option code
+ **              outData      (out)  out sub-option data if found
+ **              outDataMax   (in)   max outData buffer len
+ **              outLen       (out)  number of bytes written to outData
+ **
+ ** RETURNS:     1 - found,  0 - not found
+ **
+ ****************************************************************************/
+static int getSubOptionDHCPv6(const char *subData, int subDataLen, uint16_t dstCode,
+                                   char *outData, int outDataMax, int *outLen)
+{
+    const char *buffPtr, *endPtr;
+    uint16_t subCode, subLen;
+
+    AnscTraceVerbose(("dstCode(%d), subDataLen(%d)\n", dstCode, subDataLen));
+
+    *outLen = 0;
+
+    buffPtr = subData;
+    endPtr = &subData[subDataLen - 1]; /* Point to the last character */
+
+    /* walk through all sub-option */
+    while (buffPtr <= endPtr - 3) /* Account for tag and length read */
+    {
+        /* Read tag */
+        subCode = ntohs(*((uint16_t *)(buffPtr)));
+        buffPtr += sizeof(uint16_t);
+
+        /* Read length */
+        subLen = ntohs(*((uint16_t *)(buffPtr)));
+        buffPtr += sizeof(uint16_t);
+
+        if ((buffPtr + subLen - 1 <= endPtr) && (dstCode == subCode))
+        {
+            *outLen = subLen < outDataMax ? subLen : outDataMax;
+            memcpy(outData, buffPtr, *outLen);
+            return 1;
+        }
+        buffPtr += subLen;
+    }
+
+    return 0;
+}
+
+/****************************************************************************
+ ** FUNCTION:     parseDHCPv6Option17
+ **
+ ** PURPOSE:      parse DHCPv6 option 17 sub-options TLV to obtain tftp Server Addr and
+ **               tftp File name
+ **
+ ** PARAMETERS:   buffer          (in)   pointer to entire DHCPv6 option 17
+ **               len             (in)   option 17 total len
+ **               tftpServer      (out)  pointer to tftpServer buffer
+ **               tftpServerLen   (in)   tftpServer buffer  len
+ **               tftpFile        (out)  pointer to tftpFile buffer
+ **               tftpFileLen     (in)   tftpFile buffer len
+ **               provServer      (out)  pointer to provServer buffer
+ **               provServerLen   (in)   provServer buffer len
+ **               syslogServer    (out)  pointer to syslogServer buffer
+ **               syslogServerLen (in)   syslogServer buffer len
+ **
+ ** RETURNS:      0 - successful,  others - fail.
+ **
+ ****************************************************************************/
+static int parseDHCPv6Option17(const char *buffer, int len,
+                               char *tftpServer, int tftpServerLen,
+                               char *tftpFile, int tftpFileLen,
+                               char *provServer, int provServerLen,
+                               char *syslogServer, int syslogServerLen)
+{
+#define SUB_OPTION_TFTP_SERVER_ADDR  32
+#define SUB_OPTION_CFG_FILE_NAME     33
+#define SUB_OPTION_SYSLOG_SERVER     34
+#define SUB_OPTION_CABLELABS_CONFIG  2171
+#define ELEMENT_PROV_SERVER          3
+#define FQDN_TYPE                    0
+
+    int offset = 0, subDataLen = 0, tmpLen = 0;
+    char tmpBuff[MAX_STR] = {0};
+    struct in6_addr in6Addr = {0};
+
+    AnscTraceVerbose(("Entry\n"));
+
+    if (!len || !buffer || !tftpServer || !tftpServerLen || !tftpFile || !tftpFileLen
+        || !provServer || !provServerLen || !syslogServer || !syslogServerLen)
+    {
+        AnscTraceError(("Invalid input\n"));
+        return -1;
+    }
+
+    offset += sizeof(uint16_t); /* skip option code */
+    offset += sizeof(uint16_t); /* skip option code len */
+    offset += sizeof(uint32_t); /* skip  enterprise id */
+    subDataLen = len - offset;
+
+    if (!getSubOptionDHCPv6(&buffer[offset], subDataLen,
+                            SUB_OPTION_TFTP_SERVER_ADDR, tmpBuff,
+                            sizeof(tmpBuff), &tmpLen))
+    {
+        AnscTraceInfo(("get sub-option %d failed\n", SUB_OPTION_TFTP_SERVER_ADDR));
+    }
+    else
+    {
+        memcpy(&in6Addr.s6_addr, tmpBuff, sizeof(in6Addr.s6_addr));
+        inet_ntop(AF_INET6, &in6Addr, tftpServer, tftpServerLen);
+        AnscTraceVerbose(("found tftpServer = [%s]\n", tftpServer));
+    }
+
+    if (!getSubOptionDHCPv6(&buffer[offset], subDataLen,
+                            SUB_OPTION_CFG_FILE_NAME, tftpFile, tftpFileLen,
+                            &tmpLen))
+    {
+        AnscTraceInfo(("get sub-option %d failed\n", SUB_OPTION_CFG_FILE_NAME));
+    }
+    else
+    {
+        AnscTraceVerbose(("found tftpFile = [%s]\n", tftpFile));
+    }
+
+    if (!getSubOptionDHCPv6(&buffer[offset], subDataLen,
+                            SUB_OPTION_SYSLOG_SERVER, tmpBuff, sizeof(tmpBuff),
+                            &tmpLen))
+    {
+        AnscTraceInfo(("get sub-option %d failed\n", SUB_OPTION_SYSLOG_SERVER));
+    }
+    else
+    {
+        memset(&in6Addr, 0, sizeof(in6Addr));
+        memcpy(&in6Addr.s6_addr, tmpBuff, sizeof(in6Addr.s6_addr));
+        inet_ntop(AF_INET6, &in6Addr, syslogServer, syslogServerLen);
+        AnscTraceVerbose(("found syslogServer = [%s]\n", syslogServer));
+    }
+
+    if (!getSubOptionDHCPv6(&buffer[offset], subDataLen,
+                            SUB_OPTION_CABLELABS_CONFIG, tmpBuff,
+                            sizeof(tmpBuff), &tmpLen))
+    {
+        AnscTraceInfo(("get sub-option %d failed\n", SUB_OPTION_CABLELABS_CONFIG));
+    }
+    else
+    {
+        char tmpBuff2[MAX_STR] = {0};
+
+        /* Parse elements */
+        if (!getSubOptionDHCPv6(tmpBuff, tmpLen, ELEMENT_PROV_SERVER,
+                                tmpBuff2, sizeof(tmpBuff2), &tmpLen))
+        {
+            AnscTraceInfo(("get element %d failed\n", ELEMENT_PROV_SERVER));
+        }
+        else if (FQDN_TYPE == tmpBuff2[0])
+        {
+            parseFqdnFormat(tmpBuff2 + sizeof(uint8_t), /* Skip type code */
+                            tmpLen - sizeof(uint8_t),   /* Skip type code */
+                            provServer, provServerLen);
+            AnscTraceVerbose(("found provServer = [%s]\n", provServer));
+        }
+    }
+
+    return 0;
+}
+
+/****************************************************************************
+ ** FUNCTION:    getSubOptionDHCPv4
+ **
+ ** PURPOSE:     Get any specified sub-option data from DHCPv4 sub-option.
+ **
+ ** PARAMETERS:  subData      (in)   all of sub-option TLV
+ **              subDataLen   (in)   total len of subData
+ **              dstCode      (in)   target sub-option code
+ **              outData      (out)  out sub-option data if found
+ **              outDataMax   (in)   max outData buffer len
+ **              outLen       (out)  number of bytes written to outData
+ **
+ ** RETURNS:     1 - found,  0 - not found
+ **
+ ****************************************************************************/
+static int getSubOptionDHCPv4(const char *subData, int subDataLen, uint16_t dstCode,
+                                   char *outData, int outDataMax, int *outLen)
+{
+    const char *buffPtr, *endPtr;
+    uint8_t subCode, subLen;
+
+    AnscTraceVerbose(("dstCode(%d)\n", dstCode));
+
+    *outLen = 0;
+
+    buffPtr = subData;
+    endPtr = &subData[subDataLen - 1]; /* Point to the last character */
+
+    /* walk through all sub-option */
+    while (buffPtr <= endPtr - 1) /* Account for tag and length read */
+    {
+        /* Read tag */
+        subCode = buffPtr[0];
+        buffPtr += sizeof(uint8_t);
+
+        /* Read length */
+        subLen = buffPtr[0];
+        buffPtr += sizeof(uint8_t);
+
+        if ((buffPtr + subLen - 1 <= endPtr) && (dstCode == subCode))
+        {
+            *outLen = subLen < outDataMax ? subLen : outDataMax;
+            memcpy(outData, buffPtr, *outLen);
+            return 1;
+        }
+        buffPtr += subLen;
+    }
+
+    return 0;
+}
+
+/****************************************************************************
+ ** FUNCTION:     parseDHCPv4Option122
+ **
+ ** PURPOSE:      parse DHCPv4 option 122 sub-options TLV.
+ **
+ ** PARAMETERS:   buffer          (in)   pointer to entire DHCPv4 option 122
+ **               len             (in)   option 122 total len
+ **               provServer      (out)  pointer to provServer buffer
+ **               provServerLen   (in)   provServer buffer len
+ **
+ ** RETURNS:      0 - successful,  others - fail.
+ **
+ ****************************************************************************/
+static int parseDHCPv4Option122(const char *buffer, int len,
+                                char *provServer, int provServerLen)
+{
+#define SUB_OPTION_PROV_SERVER  3
+
+    int offset = 0, subDataLen = 0, tmpLen = 0;
+    char tmpBuff[MAX_STR] = {0};
+
+    AnscTraceVerbose(("Entry\n"));
+
+    if (!len || !buffer || !provServer || !provServerLen)
+    {
+        AnscTraceError(("Invalid input, buffer(%p), len(%d), provServer(%p), "
+                        "provServerLen(%d)\n",
+                        buffer, len, provServer, provServerLen));
+        return -1;
+    }
+
+    offset += sizeof(uint8_t); /* skip option code */
+    offset += sizeof(uint8_t); /* skip option code len */
+    subDataLen = len - offset;
+
+    if (!getSubOptionDHCPv4(&buffer[offset], subDataLen,
+                            SUB_OPTION_PROV_SERVER, tmpBuff,
+                            sizeof(tmpBuff), &tmpLen))
+    {
+        AnscTraceInfo(("get sub-option %d failed\n", SUB_OPTION_PROV_SERVER));
+    }
+    else if (FQDN_TYPE == tmpBuff[0])
+    {
+        parseFqdnFormat(tmpBuff + sizeof(uint8_t),  /* Skip type code */
+                        tmpLen - sizeof(uint8_t),   /* Skip type code */
+                        provServer, provServerLen);
+    }
+
+    return 0;
+}
+
+/****************************************************************************
+ ** FUNCTION:    parseDHCPv4Options
+ **
+ ** PURPOSE:     Parse DHCPv4 env file to obtain DHCP parameters.
+ **
+ ** PARAMETERS:  buffer           (in/out)pointer to DHCPv4 env file (NULL
+ **                                       terminated) - buffer may be modified
+ **              tftpServer       (out)   pointer to tftpServer buffer
+ **              tftpServerLen    (in)    tftpServer buffer len
+ **              tftpFile         (out)   pointer to tftpFile buffer
+ **              tftpFileLen      (in)    tftpFile buffer len
+ **              provServer       (out)   pointer to provServer buffer
+ **              provServerLen    (in)    provServer buffer len
+ **              domain           (out)   pointer to domain buffer
+ **              domainLen        (in)    domain buffer len
+ **              syslogServer     (out)   pointer to syslogServer buffer
+ **              syslogServerLen  (in)    syslogServer buffer len
+ **              hostname         (out)   pointer to hostname buffer
+ **              hostnameLen      (in)    hostname buffer len
+ **              dnsServer        (out)   pointer to dnsServer buffer
+ **              dnsServerLen     (in)    dnsServer buffer len
+ **
+ ** RETURNS:     0 - successful,  others - fail.
+ **
+ ****************************************************************************/
+static int parseDHCPv4Options(char *buffer,
+                              char *tftpServer, int tftpServerLen,
+                              char *tftpFile, int tftpFileLen,
+                              char *provServer, int provServerLen,
+                              char *domain, int domainLen,
+                              char *syslogServer, int syslogServerLen,
+                              char *hostname, int hostnameLen,
+                              char *dnsServer, int dnsServerLen)
+{
+#define DHCP_FIELD_NEXT_SERVER_IP_ADDRESS   "siaddr"
+#define DHCP_FIELD_SERVER_HOST_NAME         "sname"
+#define DHCP_FIELD_BOOT_FILE_NAME           "boot_file"
+#define DHCP_OPTION_6_DOMAIN_NAME_SERVER    "dns"
+#define DHCP_OPTION_7_LOG_SERVER            "logsvr"
+#define DHCP_OPTION_12_HOST_NAME            "hostname"
+#define DHCP_OPTION_15_DOMAIN_NAME          "domain"
+
+    char *pLine = NULL, *pTag = NULL, *pValue = NULL;
+    char *saveptrBuffer = NULL, *saveptrLine = NULL;
+
+    AnscTraceVerbose(("Entry\n"));
+
+    pLine = strtok_r(buffer, "\n", &saveptrBuffer);
+
+    while (NULL != pLine)
+    {
+        AnscTraceVerbose(("pLine: %s\n", pLine));
+
+        pTag = strtok_r(pLine, "=", &saveptrLine);
+        pValue = strtok_r(NULL, "=", &saveptrLine);
+
+        if (NULL != pValue)
+        {
+            if (tftpServer && !strncmp(pTag, DHCP_FIELD_NEXT_SERVER_IP_ADDRESS,
+                                       sizeof(DHCP_FIELD_NEXT_SERVER_IP_ADDRESS)))
+            {
+                snprintf(tftpServer, tftpServerLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], tftpserver value=[%s]\n", DHCP_FIELD_NEXT_SERVER_IP_ADDRESS, pValue));
+            }
+            else if (provServer && !strncmp(pTag, DHCP_FIELD_SERVER_HOST_NAME,
+                                            sizeof(DHCP_FIELD_SERVER_HOST_NAME)))
+            {
+                snprintf(provServer, provServerLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], provServer value=[%s]\n", DHCP_FIELD_SERVER_HOST_NAME, pValue));
+            }
+            else if (tftpFile && !strncmp(pTag, DHCP_FIELD_BOOT_FILE_NAME,
+                                          sizeof(DHCP_FIELD_BOOT_FILE_NAME)))
+            {
+                snprintf(tftpFile, tftpFileLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], tftpFile value=[%s]\n", DHCP_FIELD_BOOT_FILE_NAME, pValue));
+            }
+            else if (syslogServer && !strncmp(pTag, DHCP_OPTION_7_LOG_SERVER,
+                                              sizeof(DHCP_OPTION_7_LOG_SERVER)))
+            {
+                snprintf(syslogServer, syslogServerLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], syslogServer value=[%s]\n", DHCP_OPTION_7_LOG_SERVER, pValue));
+            }
+            else if (hostname && !strncmp(pTag, DHCP_OPTION_12_HOST_NAME,
+                                      sizeof(DHCP_OPTION_12_HOST_NAME)))
+            {
+                snprintf(hostname, hostnameLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], hostname value=[%s]\n", DHCP_OPTION_12_HOST_NAME, pValue));
+            }
+            else if (domain && !strncmp(pTag, DHCP_OPTION_15_DOMAIN_NAME,
+                                        sizeof(DHCP_OPTION_15_DOMAIN_NAME)))
+            {
+                snprintf(domain, domainLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], domain value=[%s]\n", DHCP_OPTION_15_DOMAIN_NAME, pValue));
+            }
+            else if (dnsServer && !strncmp(pTag, DHCP_OPTION_6_DOMAIN_NAME_SERVER,
+                                           sizeof(DHCP_OPTION_6_DOMAIN_NAME_SERVER)))
+            {
+                snprintf(dnsServer, dnsServerLen, "%s", pValue);
+                AnscTraceVerbose(("found tag=[%s], value=[%s]\n", DHCP_OPTION_6_DOMAIN_NAME_SERVER, pValue));
+            }
+        }
+
+        /* Get next line */
+        pLine = strtok_r(NULL, "\n", &saveptrBuffer);
+    }
+
+    return 0;
+}
+
+/****************************************************************************
+ ** FUNCTION:    getOptionsFileData
+ **
+ ** PURPOSE:     Get options file data, decrypt, and store in buffer.
+ **
+ ** PARAMETERS:  buf      (out)  Buffer to store file data
+ **              bufLen   (in)   Length of buffer
+ **              filepath (in)   filepath string
+ **              ifName   (in)   interface name string
+ **
+ ** RETURNS:     Length of bytes stored to buffer.
+ **
+ ****************************************************************************/
+static int getOptionsFileData(char *buf, int bufLen, const char *filepath, const char *ifName)
+{
+    FILE *f = NULL;
+    int len = 0;
+    char fullFilePath[MAX_STR] = {0};
+
+    if ( filepath == NULL || ifName == NULL )
+    {
+        AnscTraceError(( "filepath or ifName is NULL\n" ));
+        return 0;
+    }
+
+    /* Build file path */
+    snprintf(fullFilePath, sizeof(fullFilePath), filepath, cxcProvDhcpOptionsPrefix, ifName);
+
+    /* Parse DHCP Options file */
+    f = fopen(fullFilePath, "r");
+    if (f != NULL)
+    {
+        len = fread(buf, 1, bufLen, f);
+        fclose(f);
+
+        AnscTraceVerbose(("fullFilePath(%s) read %d bytes\n", fullFilePath, len));
+
+        /* decrypt file */
+        dhcpEncryptCfgFile(buf, len, BRCM_DHCP_CONFIG_KEY);
+    }
+    else
+    {
+        // Not all options are expected to be present
+        AnscTraceInfo(("cannot open fullFilePath(%s) or file does not exist\n",
+                       fullFilePath));
+        return 0;
+    }
+
+    return len;
+}
+
+/****************************************************************************
+* FUNCTION:   fillDhcpOptionsV4
+*
+* PURPOSE:    Fill the DHCPv4 options portion of the VoiceInterfaceInfoType
+*             structure if the information is available.
+*
+* PARAMETERS: pIfInfo - Pointer to the VoiceInterfaceInfoType structure
+*
+* RETURNS:    None
+*
+* NOTES:      This function relies on the temporary dhcp options file in the
+*             system.
+*
+****************************************************************************/
+static void fillDhcpOptionsV4(VoiceInterfaceInfoType *pIfInfo)
+{
+    int len;
+    char buffer[MAX_DHCP_OPTION_LEN+1] = {0};
+
+    AnscTraceVerbose(("Entry\n"));
+
+    len = getOptionsFileData(buffer, MAX_DHCP_OPTION_LEN,
+                             cxcProvDhcpV4OptionsFilePath, pIfInfo->intfName);
+    if (len)
+    {
+        buffer[len] = '\0';
+
+        parseDHCPv4Options(buffer,
+                           pIfInfo->v4NextServerIp, sizeof(pIfInfo->v4NextServerIp),
+                           pIfInfo->v4BootFileName, sizeof(pIfInfo->v4BootFileName),
+                           pIfInfo->v4ServerHostName, sizeof(pIfInfo->v4ServerHostName),
+                           pIfInfo->v4DomainName, sizeof(pIfInfo->v4DomainName),
+                           pIfInfo->v4LogServerIp, sizeof(pIfInfo->v4LogServerIp),
+                           pIfInfo->v4HostName, sizeof(pIfInfo->v4HostName),
+                           pIfInfo->v4DnsServers, sizeof(pIfInfo->v4DnsServers));
+    }
+
+    /* OPTION 122 - CableLabs Client Configuration (RFC 3495) */
+    memset(buffer, 0, sizeof(buffer));
+    len = getOptionsFileData(buffer, sizeof(buffer),
+                             cxcProvDhcpV4Option122FilePath, pIfInfo->intfName);
+    if (len)
+    {
+        /* Overwrite with option 122 if available */
+        parseDHCPv4Option122(buffer, len, pIfInfo->v4ProvServer, sizeof(pIfInfo->v4ProvServer));
+        AnscTraceVerbose(("option 122 provServer = [%s]\n", pIfInfo->v4ProvServer));
+    }
+}
+
+/****************************************************************************
+* FUNCTION:   fillDhcpOptionsV6
+*
+* PURPOSE:    Fill the DHCPv6 options portion of the VoiceInterfaceInfoType
+*             structure if the information is available.
+*
+* PARAMETERS: pIfInfo - Pointer to the VoiceInterfaceInfoType structure
+*
+* RETURNS:    None
+*
+* NOTES:      This function relies on the temporary dhcp options file in the
+*             system.
+*
+****************************************************************************/
+static void fillDhcpOptionsV6(VoiceInterfaceInfoType *pIfInfo)
+{
+    int len, subLen;
+    char buffer[MAX_DHCP_OPTION_LEN] = {0};
+    char *pStr;
+    struct in6_addr in6Addr = {0};
+
+    AnscTraceVerbose(("Entry\n"));
+
+    /* OPTION 17 - Vendor-specific Information */
+    len = getOptionsFileData(buffer, sizeof(buffer),
+                             cxcProvDhcpV6Option17FilePath, pIfInfo->intfName);
+    if (len)
+    {
+        parseDHCPv6Option17(buffer, len,
+                            pIfInfo->v6TftpServerIp, sizeof(pIfInfo->v6TftpServerIp),
+                            pIfInfo->v6TftpFileName, sizeof(pIfInfo->v6TftpFileName),
+                            pIfInfo->v6ProvServerIp, sizeof(pIfInfo->v6ProvServerIp),
+                            pIfInfo->v6SyslogServerIp, sizeof(pIfInfo->v6SyslogServerIp));
+    }
+
+    /* OPTION 23 - DNS list */
+    len = getOptionsFileData(buffer, sizeof(buffer),
+                             cxcProvDhcpV6Option23FilePath, pIfInfo->intfName);
+    if (len >= (int)(sizeof(in6Addr.s6_addr) + 4)) // Account for 2 byte tag and length
+    {
+        char tmpBuff[MAX_STR] = {0};
+
+        memcpy(&in6Addr.s6_addr, tmpBuff, sizeof(in6Addr.s6_addr));
+        inet_ntop(AF_INET6, &in6Addr, pIfInfo->v6DnsServers, sizeof(pIfInfo->v6DnsServers));
+        AnscTraceVerbose(("option 23 v6DnsServers = [%s]\n", pIfInfo->v6DnsServers));
+    }
+
+    /* OPTION 24 - Domain Search List */
+    len = getOptionsFileData(buffer, sizeof(buffer),
+                             cxcProvDhcpV6Option24FilePath, pIfInfo->intfName);
+    if (len)
+    {
+        subLen = ntohs(*(uint16_t *)(buffer + sizeof(uint16_t))); /* store data length */
+        pStr = buffer + sizeof(uint16_t) + sizeof(uint16_t); /* skip option code and size */
+        parseFqdnFormat(pStr, subLen, pIfInfo->v6DomainName, sizeof(pIfInfo->v6DomainName));
+        AnscTraceVerbose(("option 24 domain = [%s]\n", pIfInfo->v6DomainName));
+    }
+
+    /* OPTION 39 - Client FQDN */
+    len = getOptionsFileData(buffer, sizeof(buffer),
+                             cxcProvDhcpV6Option39FilePath, pIfInfo->intfName);
+    if (len)
+    {
+        subLen = ntohs(*(uint16_t *)(buffer + sizeof(uint16_t))); /* store data length */
+        pStr = buffer + sizeof(uint16_t) + sizeof(uint16_t); /* skip option code and size */
+        parseFqdnFormat(pStr + sizeof(uint8_t),     /* Skip reserved byte */
+                        subLen - sizeof(uint8_t),   /* Skip reserved byte */
+                        pIfInfo->v6ClientFqdn, sizeof(pIfInfo->v6ClientFqdn));
+        AnscTraceVerbose(("option 39 fqdn = [%s]\n", pIfInfo->v6ClientFqdn));
+    }
+}
+
+#endif
 #ifdef MTA_TR104SUPPORT
 
 int CosaDmlTR104DataSet(char *pString,int bootup);
@@ -164,7 +792,116 @@ int mtaReapplytr104Conf(void)
 
 #endif // MTA_TR104SUPPORT
 
+#if defined (SCXF10)
+static char voiceInterface[32] = { 0 };
 
+static uint8_t cbSubsIfInfo(char *pIntfName, uint8_t enable)
+{
+    if (enable)
+    {
+        /* Save voice interface selection */
+        strncpy(voiceInterface, pIntfName, sizeof(voiceInterface));
+    }
+
+    return 1;
+}
+
+static void setSysevent(char * pCommand, uint8_t ui8Enable)
+{
+    int syseventFd = -1;
+    token_t syseventToken;
+
+    syseventFd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "Firewall", &syseventToken);
+    if (syseventFd < 0)
+    {
+        AnscTraceError(("%s:%d - sysevent_open failed\n", __FUNCTION__, __LINE__));
+        return;
+    }
+
+    AnscTraceInfo(("%s: ui8Enable=%d\n", __FUNCTION__, ui8Enable));
+    AnscTraceInfo(("%s: Calling sysevent command: %s\n", __FUNCTION__, pCommand));
+    if (ui8Enable)
+    {
+        if (NULL == pCommand || '\0' == pCommand[0] || strlen(pCommand) <= 0)
+        {
+            AnscTraceError(("%s: Invalid command string\n", __FUNCTION__));
+            sysevent_close(syseventFd, syseventToken);
+            return;
+        }
+        sysevent_set(syseventFd, syseventToken, "VoiceIpRule", pCommand, 0);
+    }
+    else
+        sysevent_unset(syseventFd, syseventToken, "VoiceIpRule");
+
+    AnscTraceInfo(("%s: Calling sysevent firewall-restart\n", __FUNCTION__));
+    sysevent_set(syseventFd, syseventToken, "firewall-restart", "", 0);
+    sysevent_close(syseventFd, syseventToken);
+}
+
+static uint8_t cbSetFirewallRule(VoiceFirewallRuleType *pFirewallRule)
+{
+    char command[1000] = { 0 };
+    char protocol[10] = "UDP";
+
+    /* Default all protocol to UDP except TCP.  Do not support "TCP or UDP" option. */
+    if (!strcmp("TCP", pFirewallRule->protocol))
+    {
+       strcpy(protocol, "TCP");
+    }
+
+    AnscTraceInfo(("%s: enable=%d, ifName=%s, protocol=%s, destPort=%u\n",
+                   __FUNCTION__, pFirewallRule->enable,
+                   pFirewallRule->ifName,
+                   protocol,
+                   pFirewallRule->destinationPort));
+    if (pFirewallRule->enable)
+    {
+       snprintf(command, sizeof(command), "-A INPUT -p %s -i %s --dport %u -j ACCEPT",
+                protocol, pFirewallRule->ifName, pFirewallRule->destinationPort);
+    }
+    setSysevent(command, pFirewallRule->enable);
+    return 1;
+}
+
+static uint8_t cbGetCertInfo(VoiceCertificateInfoType *pCertInfo)
+{
+    UNREFERENCED_PARAMETER(pCertInfo);
+
+    return 0;
+}
+
+
+void
+CosaDmlNotifyIf(char *pIpAddr)
+{
+    VoiceInterfaceInfoType sysIfaceInfo = { 0 };
+
+    // Fill interface info
+    sysIfaceInfo.isPhyUp = TRUE;
+    strncpy(sysIfaceInfo.intfName, voiceInterface, sizeof(sysIfaceInfo.intfName));
+    if (strchr(pIpAddr, '.'))
+    {
+        sysIfaceInfo.isIpv4Up = TRUE;
+        strncpy(sysIfaceInfo.ipv4Addr, pIpAddr, sizeof(sysIfaceInfo.ipv4Addr));
+    }
+    else
+    {
+        sysIfaceInfo.isIpv6Up = TRUE;
+        strncpy(sysIfaceInfo.ipv6GlobalAddr, pIpAddr, sizeof(sysIfaceInfo.ipv6GlobalAddr));
+    }
+
+	// Fill DHCP options
+    fillDhcpOptionsV4(&sysIfaceInfo);
+	fillDhcpOptionsV6(&sysIfaceInfo);
+
+    // Call interface info notification
+	AnscTraceInfo(("Calling voice_hal_interface_info_notify...\n"));
+
+    /* Call HAL API */
+    voice_hal_interface_info_notify(&sysIfaceInfo);
+}
+
+#endif
 ANSC_STATUS
 CosaDmlMTAInit
     (
@@ -177,8 +914,18 @@ CosaDmlMTAInit
 
    // PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)phContext;
 
+	AnscTraceInfo(("CosaDmlMTAInit:  mta_hal_InitDB() \n"));
+
     if ( mta_hal_InitDB() == RETURN_OK )
+	{
+#if defined (SCXF10)
+		AnscTraceInfo(("CosaDmlMTAInit: voice_hal_register_cb() \n"));
+
+		/* Register callback functions */
+		voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo);
+#endif
         return ANSC_STATUS_SUCCESS;
+    }
     else
         return ANSC_STATUS_FAILURE;
 }
