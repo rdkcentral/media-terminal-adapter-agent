@@ -217,7 +217,27 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
         }
         memset(pDhcpEvtData, 0, sizeof(DhcpEventData_t));
         pDhcpEvtData->dhcpVersion = strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) ? DHCP_IPv4 : DHCP_IPv6;
-        rbusValue_t rbusValue = rbusObject_GetValue(pRbusEvent->data, "IfName");
+        if (0 == access("/tmp/dumpDHCPevent.txt", F_OK))
+        {
+            FILE *fp = fopen("/tmp/dhcp_event_dump.txt", "w");
+            if(fp)
+            {
+                CcspTraceError(("Writing DHCP event data to /tmp/dhcp_event_dump.txt\n"));
+                rbusObject_fwrite(pRbusEvent->data, 0, fp);
+                fclose(fp);
+            }
+        }
+
+        // Unwrap the data - check if it's wrapped in "initialValue" (from publishOnSubscribe)
+        rbusObject_t dataObj = pRbusEvent->data;
+        rbusValue_t initialValue = rbusObject_GetValue(dataObj, "initialValue");
+        if (initialValue)
+        {
+            // Data is wrapped (came from get handler with publishOnSubscribe)
+            dataObj = rbusValue_GetObject(initialValue);
+            CcspTraceInfo(("%s: Unwrapped initialValue\n", __FUNCTION__));
+        }
+        rbusValue_t rbusValue = rbusObject_GetValue(dataObj, "IfName");
         const char *pIfaceName = rbusValue_GetString(rbusValue, NULL);
         if (NULL == pIfaceName || strlen(pIfaceName) == 0)
         {
@@ -229,7 +249,7 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
         CcspTraceInfo(("%s: DHCP %s event for interface %s\n", __FUNCTION__,
             (pDhcpEvtData->dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", pDhcpEvtData->cIfaceName));
 
-        rbusValue = rbusObject_GetValue(pRbusEvent->data, "MsgType");
+        rbusValue = rbusObject_GetValue(dataObj, "MsgType");
         pDhcpEvtData->dhcpMsgType = (DHCP_MESSAGE_TYPE)rbusValue_GetUInt32(rbusValue);
         CcspTraceInfo(("%s: DHCP Message Type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
 
@@ -237,7 +257,7 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
             DHCP_CLIENT_STARTED == pDhcpEvtData->dhcpMsgType || DHCP_CLIENT_STOPPED == pDhcpEvtData->dhcpMsgType || DHCP_CLIENT_FAILED == pDhcpEvtData->dhcpMsgType)
         {
             int iByteLen = 0;
-            rbusValue = rbusObject_GetValue(pRbusEvent->data, "LeaseInfo");
+            rbusValue = rbusObject_GetValue(dataObj, "LeaseInfo");
             const uint8_t* pLeaseInfo = rbusValue_GetBytes(rbusValue, &iByteLen);
             if (pLeaseInfo != NULL && iByteLen > 0)
             {
