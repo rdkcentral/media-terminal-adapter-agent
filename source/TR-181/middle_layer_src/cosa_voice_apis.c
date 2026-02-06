@@ -317,7 +317,6 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     system(cParamName);
 }
 
-#if 0 // Checking with broadcom team regarding Option122 support. Currently if we pass null then it is proceding further.
 /*
  *@brief Convert a hexadecimal string to a byte array.
  * This helper function takes a hexadecimal string representation and converts it
@@ -396,7 +395,7 @@ static int getOption122_SubOptions(uint8_t *pOption122Data, uint16_t iOption122L
     }
     return -1; // Sub-option not found
 }
-#endif
+
 /*
  *@breif This function initializes the voice support related parameters based on DHCP event data
  *@param pDhcpEvtData - Pointer to the DHCP event data structure
@@ -467,7 +466,7 @@ typedef struct
     strncpy(sVoiceInterfaceInfoType.v4DomainName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName, sizeof(sVoiceInterfaceInfoType.v4DomainName)-1);
     strncpy(sVoiceInterfaceInfoType.v4LogServerIp, "(null)", sizeof(sVoiceInterfaceInfoType.v4LogServerIp)-1);
     strncpy(sVoiceInterfaceInfoType.v4ServerHostName, "(null)", sizeof(sVoiceInterfaceInfoType.v4ServerHostName)-1);
-    #if 0 // Checking with broadcom team regarding Option122 support. Currently if we pass null then it is proceding further.
+
     //Retrieve Option122 SubOption 3 for Provisioning Server
     uint8_t *pSubOptData = NULL;
     uint8_t ui8SubOptionLen = 0;
@@ -488,12 +487,18 @@ typedef struct
         memcpy(sVoiceInterfaceInfoType.v4ProvServer, pSubOptData, iCopyLen);
         sVoiceInterfaceInfoType.v4ProvServer[iCopyLen] = '\0';
         CcspTraceInfo(("%s:%d, Retrieved Option122 SubOption 3 for Provisioning Server: %s and len:%u\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ProvServer, ui8SubOptionLen));
+        CcspTraceInfo(("%s:%d, Option122 SubOption 3 in hex: ", __FUNCTION__, __LINE__));
+        char cHexBuf[256] = {0};
+        long unsigned int uiPos = 0;
+        for (int i = 0; i < ui8SubOptionLen && uiPos < sizeof(cHexBuf) - 3; i++) {
+            uiPos += snprintf(cHexBuf + uiPos, sizeof(cHexBuf) - uiPos, "%02x ", pSubOptData[i]);
+        }
+        CcspTraceInfo(("%s:%d, Option122 SubOption 3 hex: %s\n", __FUNCTION__, __LINE__, cHexBuf));
     }
     else {
         CcspTraceError(("%s: Failed to get Option122 SubOption 3 for Provisioning Server\n", __FUNCTION__));
     }
-    #endif
-    strncpy(sVoiceInterfaceInfoType.v4ProvServer, "(null)", sizeof(sVoiceInterfaceInfoType.v4ProvServer)-1);
+
     CcspTraceInfo(("%s:%d, Initializing Voice Support with following details:\n", __FUNCTION__, __LINE__));
     CcspTraceInfo(("%s:%d, Interface Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.intfName));
     CcspTraceInfo(("%s:%d, IPv4 Address: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.ipv4Addr));
