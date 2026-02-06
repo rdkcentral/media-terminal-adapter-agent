@@ -209,6 +209,50 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
 
     if(strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) || strstr(pRbusEvent->name, DHCP_MGR_DHCPv6_TABLE))
     {
+        if (0 == access("/tmp/dumpDHCPevent.txt", F_OK))
+        {
+            FILE *fp = fopen("/tmp/dhcp_event_dump.txt", "a");
+            if(fp)
+            {
+                CcspTraceError(("Writing DHCP event data to /tmp/dhcp_event_dump.txt\n"));
+                fprintf(fp, "Event Name: %s\n", pRbusEvent->name);
+                fprintf(fp, "Event Data:\n");
+                rbusObject_fwrite(pRbusEvent->data, 0, fp);
+                fprintf(fp, "\n-----------------------\n");
+                fclose(fp);
+            }
+        }
+        // Unwrap the data - check if it's wrapped in "initialValue" (from publishOnSubscribe)
+        rbusObject_t dataObj = pRbusEvent->data;
+        rbusValue_t initialValue = rbusObject_GetValue(dataObj, "initialValue");
+        if (NULL != initialValue)
+        {
+            // Check the type before unwrapping
+            rbusValueType_t valueType = rbusValue_GetType(initialValue);
+
+            if (valueType == RBUS_OBJECT)
+            {
+                // Valid lease data wrapped in object
+                dataObj = rbusValue_GetObject(initialValue);
+                CcspTraceInfo(("%s: Unwrapped initialValue object\n", __FUNCTION__));
+            }
+            else if (valueType == RBUS_STRING)
+            {
+                // Empty string (no lease available yet)
+                const char *pStrVal = rbusValue_GetString(initialValue, NULL);
+                if (NULL == pStrVal || strlen(pStrVal) == 0)
+                {
+                    CcspTraceInfo(("%s: Empty initialValue - no lease available yet\n", __FUNCTION__));
+                    return;
+                }
+            }
+            else
+            {
+                CcspTraceWarning(("%s: Unexpected initialValue type %d\n", __FUNCTION__, valueType));
+                return;
+            }
+        }
+
         DhcpEventData_t *pDhcpEvtData = (DhcpEventData_t *)malloc(sizeof(DhcpEventData_t));
         if (pDhcpEvtData == NULL)
         {
@@ -217,27 +261,14 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
         }
         memset(pDhcpEvtData, 0, sizeof(DhcpEventData_t));
         pDhcpEvtData->dhcpVersion = strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) ? DHCP_IPv4 : DHCP_IPv6;
-        if (0 == access("/tmp/dumpDHCPevent.txt", F_OK))
-        {
-            FILE *fp = fopen("/tmp/dhcp_event_dump.txt", "w");
-            if(fp)
-            {
-                CcspTraceError(("Writing DHCP event data to /tmp/dhcp_event_dump.txt\n"));
-                rbusObject_fwrite(pRbusEvent->data, 0, fp);
-                fclose(fp);
-            }
-        }
 
-        // Unwrap the data - check if it's wrapped in "initialValue" (from publishOnSubscribe)
-        rbusObject_t dataObj = pRbusEvent->data;
-        rbusValue_t initialValue = rbusObject_GetValue(dataObj, "initialValue");
-        if (initialValue)
-        {
-            // Data is wrapped (came from get handler with publishOnSubscribe)
-            dataObj = rbusValue_GetObject(initialValue);
-            CcspTraceInfo(("%s: Unwrapped initialValue\n", __FUNCTION__));
-        }
         rbusValue_t rbusValue = rbusObject_GetValue(dataObj, "IfName");
+        if (NULL == rbusValue)
+        {
+            CcspTraceInfo(("%s: No IfName in event (empty data)\n", __FUNCTION__));
+            free(pDhcpEvtData);
+            return;
+        }
         const char *pIfaceName = rbusValue_GetString(rbusValue, NULL);
         if (NULL == pIfaceName || strlen(pIfaceName) == 0)
         {
@@ -250,7 +281,14 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
             (pDhcpEvtData->dhcpVersion == DHCP_IPv4) ? "IPv4" : "IPv6", pDhcpEvtData->cIfaceName));
 
         rbusValue = rbusObject_GetValue(dataObj, "MsgType");
+        if (NULL == rbusValue)
+        {
+            CcspTraceInfo(("%s: No MsgType in event (empty data)\n", __FUNCTION__));
+            free(pDhcpEvtData);
+            return;
+        }
         pDhcpEvtData->dhcpMsgType = (DHCP_MESSAGE_TYPE)rbusValue_GetUInt32(rbusValue);
+
         CcspTraceInfo(("%s: DHCP Message Type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
 
         if (DHCP_LEASE_UPDATE == pDhcpEvtData->dhcpMsgType || DHCP_LEASE_RENEW == pDhcpEvtData->dhcpMsgType || DHCP_LEASE_DEL == pDhcpEvtData->dhcpMsgType || \
@@ -258,6 +296,12 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
         {
             int iByteLen = 0;
             rbusValue = rbusObject_GetValue(dataObj, "LeaseInfo");
+            if (NULL == rbusValue)
+            {
+                CcspTraceInfo(("%s: No LeaseInfo in event for DHCP Message Type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
+                free(pDhcpEvtData);
+                return;
+            }
             const uint8_t* pLeaseInfo = rbusValue_GetBytes(rbusValue, &iByteLen);
             if (pLeaseInfo != NULL && iByteLen > 0)
             {
@@ -346,6 +390,7 @@ void subscribeDhcpClientEvents(void)
     }
     char cEventName[64] = {0};
     rbusError_t rbusRet = RBUS_ERROR_SUCCESS;
+
     snprintf(cEventName, sizeof(cEventName), "%s.Events", cBaseParam);
 
     rbusEventSubscription_t rbusEventSubscription = {
