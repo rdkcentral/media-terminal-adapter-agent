@@ -900,6 +900,61 @@ CosaDmlNotifyIf(char *pIpAddr)
     /* Call HAL API */
     voice_hal_interface_info_notify(&sysIfaceInfo);
 }
+/*
+ * @brief Set the voice interface name in brcm based on syscfg value.
+    * If the syscfg value is not set, default to "mta0".
+    * If the default interface name from bcm is different from the syscfg value, update it in bcm using setParameterValues API.
+*/
+
+void setVoiceIfname(void)
+{
+    char cVoiceSupportIfaceName[32] = { 0 };
+    syscfg_get(NULL, "VoiceSupport_IfaceName",cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
+    AnscTraceInfo(("%s:%d, VoiceSupport_IfaceName from syscfg is %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
+
+    if (0 == strlen(cVoiceSupportIfaceName))
+    {
+        AnscTraceError(("VoiceSupport_IfaceName is not set in syscfg\n"));
+        snprintf(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "%s", "mta0");
+        AnscTraceInfo(("Defaulting VoiceSupport_IfaceName to %s\n", cVoiceSupportIfaceName));
+    }
+    char cFullpath[256] = "Device.Services.VoiceService.1.X_BROADCOM_COM_BoundIfName";
+    char cValue[128] = { 0 };
+
+    BcmRet rc;
+    char *nameArray[1] = { cFullpath };
+    BcmGenericParamInfo *getParamInfoArray = NULL;
+    UINT32 numParamInfo = 0;
+
+    rc = bcm_generic_getParameterValues((const char **)nameArray, 1, FALSE, 0,
+                                       &getParamInfoArray, &numParamInfo);
+    if (BCMRET_SUCCESS == rc)
+    {
+        if (1 == numParamInfo)
+        {
+            AnscTraceInfo(("%s:%d, Value:%s\n", __FUNCTION__, __LINE__, getParamInfoArray[0].value));
+            snprintf(cValue, sizeof(cValue), "%s", getParamInfoArray[0].value);
+        }
+        bcm_generic_freeParamInfoArray(&getParamInfoArray, numParamInfo);
+    }
+
+    if (BCMRET_SUCCESS != rc || strlen(cValue) == 0 || strcmp(cVoiceSupportIfaceName, cValue) != 0)
+    {
+        BcmGenericParamInfo setParamInfoArray[1] = { 0 };
+
+       /* Fill config structure */
+       setParamInfoArray[0].fullpath = cFullpath;
+       setParamInfoArray[0].type = "string";
+       setParamInfoArray[0].value = cVoiceSupportIfaceName;
+
+       AnscTraceInfo(("%s:%d, Setting %s to %s\n", __FUNCTION__, __LINE__, cFullpath, cVoiceSupportIfaceName));
+       rc = bcm_generic_setParameterValues(setParamInfoArray, 1, 0);
+       if (BCMRET_SUCCESS != rc) {
+          AnscTraceError(("setParamString: bcm_generic_setParameterValues failed for %s\n",
+                      cFullpath));
+       }
+    }
+}
 
 #endif
 ANSC_STATUS
@@ -920,7 +975,7 @@ CosaDmlMTAInit
 	{
 #if defined (SCXF10)
 		AnscTraceInfo(("CosaDmlMTAInit: voice_hal_register_cb() \n"));
-
+        setVoiceIfname();
 		/* Register callback functions */
 		voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo);
 #endif

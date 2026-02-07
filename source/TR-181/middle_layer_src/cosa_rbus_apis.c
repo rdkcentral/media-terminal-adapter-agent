@@ -375,23 +375,13 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
     }
 }
 
-/**
- * @brief Subscribe to DHCP client events for MTA interface.
- * This function sets up subscriptions to listen for DHCP client
- * events related to the MTA interface.
- */
-
-void subscribeDhcpClientEvents(void)
+void * eventSubscriptionThread(void * pArg)
 {
-    if (NULL == voiceRbusHandle)
-    {
-        CcspTraceError(("%s: rbus handle is NULL, cannot subscribe to events\n", __FUNCTION__));
-        return;
-    }
+    (void)pArg; // Unused parameter
     char cEventName[64] = {0};
-    rbusError_t rbusRet = RBUS_ERROR_SUCCESS;
 
     snprintf(cEventName, sizeof(cEventName), "%s.Events", cBaseParam);
+    CcspTraceInfo(("%s:%d, Subscribing to DHCP client events for MTA interface with event name %s\n", __FUNCTION__, __LINE__, cEventName));
 
     rbusEventSubscription_t rbusEventSubscription = {
         .eventName = cEventName,
@@ -405,13 +395,42 @@ void subscribeDhcpClientEvents(void)
         .publishOnSubscribe = true
     };
 
-    rbusRet = rbusEvent_SubscribeEx (voiceRbusHandle, &rbusEventSubscription, 1, 0);
+    if ('\0' == cEventName[0])
+    {
+        CcspTraceError(("%s: Event name is empty, cannot subscribe\n", __FUNCTION__));
+        return NULL;
+    }
+    CcspTraceInfo(("%s:%d, Subscribing to event %s in event subscription thread\n", __FUNCTION__, __LINE__, rbusEventSubscription.eventName));
+    rbusError_t rbusRet = rbusEvent_SubscribeEx (voiceRbusHandle, &rbusEventSubscription, 1/* Number of subscriptions */, 5 /* retry interval in seconds */);
     if (rbusRet != RBUS_ERROR_SUCCESS)
     {
-        CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, cEventName, rbusRet));
+        CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, rbusEventSubscription.eventName, rbusRet));
     }
     else
     {
-        CcspTraceInfo(("%s: rbus_event_subscribe successful for event %s\n", __FUNCTION__, cEventName));
+        CcspTraceInfo(("%s: rbus_event_subscribe successful for event %s\n", __FUNCTION__, rbusEventSubscription.eventName));
     }
+    return NULL;
+}
+/**
+ * @brief Subscribe to DHCP client events for MTA interface.
+ * This function sets up subscriptions to listen for DHCP client
+ * events related to the MTA interface.
+ */
+
+void subscribeDhcpClientEvents(void)
+{
+    if (NULL == voiceRbusHandle)
+    {
+        CcspTraceError(("%s: rbus handle is NULL, cannot subscribe to events\n", __FUNCTION__));
+        return;
+    }
+
+    pthread_t eventSubscriptionThreadId = -1;
+    if (pthread_create(&eventSubscriptionThreadId, NULL, (void *)eventSubscriptionThread, NULL) != 0)
+    {
+        CcspTraceError(("%s: Failed to create event subscription thread\n", __FUNCTION__));
+        return;
+    }
+    pthread_detach(eventSubscriptionThreadId);
 }
