@@ -7,37 +7,6 @@
     "_comment": "External repositories needed by this component",
     "repos": [
       {
-        "name": "Utopia",
-        "repo": "https://github.com/rdkcentral/utopia.git",
-        "branch": "develop",
-        "header_paths": [
-          { "source": "source/include/sysevent", "destination": "$HOME/usr/include/rdkb/sysevent" },
-          { "source": "source/include/syscfg", "destination": "$HOME/usr/include/rdkb/syscfg" },
-          { "source": "source/include", "destination": "$HOME/usr/include/rdkb/utctx" },
-          { "source": "source/include", "destination": "$HOME/usr/include/rdkb" },
-          { "source": "source/utapi/lib", "destination": "$HOME/usr/include/rdkb/utapi" },
-          { "source": "source/include/ulog", "destination": "$HOME/usr/include/rdkb/ulog" },
-          { "source": "source/util/utils", "destination": "$HOME/usr/include/rdkb" },
-          { "source": "source/sysevent/lib", "destination": "$HOME/usr/include/rdkb/sysevent" },
-          { "source": "source/util/print_uptime", "destination": "$HOME/usr/include/rdkb" }
-        ],
-        "build": {
-          "type": "script",
-          "script": "cov_docker_script/common_external_build.sh"
-        }
-      },
-      {
-        "name": "rdk_logger",
-        "repo": "https://github.com/rdkcentral/rdk_logger.git",
-        "branch": "develop",
-        "header_paths": [
-          { "source": "include", "destination": "$HOME/usr/include/rdkb" }
-        ],
-        "build": {
-          "type": "autotools"
-        }
-      },
-      {
         "name": "common-library",
         "repo": "https://github.com/rdkcentral/common-library.git",
         "branch": "develop",
@@ -57,7 +26,38 @@
         ],
         "build": {
           "type": "script",
-          "script": "cov_docker_script/common_external_build.sh"
+          "script": "build_tools_workflows/cov_docker_script/common_external_build.sh"
+        }
+      },
+      {
+        "name": "Utopia",
+        "repo": "https://github.com/rdkcentral/utopia.git",
+        "branch": "develop",
+        "header_paths": [
+          { "source": "source/include/sysevent", "destination": "$HOME/usr/include/rdkb/sysevent" },
+          { "source": "source/include/syscfg", "destination": "$HOME/usr/include/rdkb/syscfg" },
+          { "source": "source/include", "destination": "$HOME/usr/include/rdkb/utctx" },
+          { "source": "source/include", "destination": "$HOME/usr/include/rdkb" },
+          { "source": "source/utapi/lib", "destination": "$HOME/usr/include/rdkb/utapi" },
+          { "source": "source/include/ulog", "destination": "$HOME/usr/include/rdkb/ulog" },
+          { "source": "source/util/utils", "destination": "$HOME/usr/include/rdkb" },
+          { "source": "source/sysevent/lib", "destination": "$HOME/usr/include/rdkb/sysevent" },
+          { "source": "source/util/print_uptime", "destination": "$HOME/usr/include/rdkb" }
+        ],
+        "build": {
+          "type": "script",
+          "script": "build_tools_workflows/cov_docker_script/common_external_build.sh"
+        }
+      },
+      {
+        "name": "rdk_logger",
+        "repo": "https://github.com/rdkcentral/rdk_logger.git",
+        "branch": "develop",
+        "header_paths": [
+          { "source": "include", "destination": "$HOME/usr/include/rdkb" }
+        ],
+        "build": {
+          "type": "autotools"
         }
       },
       {
