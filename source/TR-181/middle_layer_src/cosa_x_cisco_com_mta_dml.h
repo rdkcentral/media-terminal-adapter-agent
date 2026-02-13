@@ -418,7 +418,8 @@ X_RDKCENTRAL_COM_MTA_SetParamBoolValue
     );
 int CosaDmlTR104DataSet(char* pString,int bootup);
 
-#if defined (SCXF10)
+//Commend out the broadcom patch changes for now, will be requried to test basic voice functionality supported by broadcom.
+#if 0 //defined (VOICE_MTA_SUPPORT)
 ULONG
 BrcmVoiceService_GetParamStringValue
     (
@@ -479,7 +480,7 @@ BrcmVoiceService_NotifyIfIp_SetParamStringValue
    );
 
 
-#endif
+#endif /*VOICE_MTA_SUPPORT*/
 #endif /* _COSA_MTA_DML_H */
 
 // #endif /* CONFIG_TI_PACM */

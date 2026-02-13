@@ -77,7 +77,7 @@
 #include "safec_lib_common.h"
 #include "sysevent/sysevent.h"
 #include "ctype.h"
-#if defined (SCXF10)
+#if defined (VOICE_MTA_SUPPORT)
 #include "voice_dhcp_hal.h"
 #include "bcm_generic_hal.h"
 #include "dhcp_config_key.h" // for dhcpEncryptCfgFile()
@@ -93,7 +93,8 @@
 #define NVRAM_BOOTSTRAP_CLEARED         (1 << 0)
 #define MAX_LINE_REG 256
 
-#if defined (SCXF10)
+//Commend out the broadcom patch changes for now, will be requried to test basic voice functionality supported by broadcom.
+#if 0 //defined (VOICE_MTA_SUPPORT)
 #define MAX_STR 256
 #define MAX_DHCP_OPTION_LEN 2048
 static const char *cxcProvDhcpOptionsPrefix = "tmp";
@@ -715,7 +716,7 @@ static void fillDhcpOptionsV6(VoiceInterfaceInfoType *pIfInfo)
     }
 }
 
-#endif
+#endif /*VOICE_MTA_SUPPORT*/
 #ifdef MTA_TR104SUPPORT
 
 int CosaDmlTR104DataSet(char *pString,int bootup);
@@ -792,120 +793,13 @@ int mtaReapplytr104Conf(void)
 
 #endif // MTA_TR104SUPPORT
 
-#if defined (SCXF10)
-static char voiceInterface[32] = { 0 };
+#if defined (VOICE_MTA_SUPPORT)
 
-static uint8_t cbSubsIfInfo(char *pIntfName, uint8_t enable)
-{
-    if (enable)
-    {
-        /* Save voice interface selection */
-        strncpy(voiceInterface, pIntfName, sizeof(voiceInterface));
-    }
-
-    return 1;
-}
-
-static void setSysevent(char * pCommand, uint8_t ui8Enable)
-{
-    int syseventFd = -1;
-    token_t syseventToken;
-
-    syseventFd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "Firewall", &syseventToken);
-    if (syseventFd < 0)
-    {
-        AnscTraceError(("%s:%d - sysevent_open failed\n", __FUNCTION__, __LINE__));
-        return;
-    }
-
-    AnscTraceInfo(("%s: ui8Enable=%d\n", __FUNCTION__, ui8Enable));
-    AnscTraceInfo(("%s: Calling sysevent command: %s\n", __FUNCTION__, pCommand));
-    if (ui8Enable)
-    {
-        if (NULL == pCommand || '\0' == pCommand[0] || strlen(pCommand) <= 0)
-        {
-            AnscTraceError(("%s: Invalid command string\n", __FUNCTION__));
-            sysevent_close(syseventFd, syseventToken);
-            return;
-        }
-        sysevent_set(syseventFd, syseventToken, "VoiceIpRule", pCommand, 0);
-    }
-    else
-        sysevent_unset(syseventFd, syseventToken, "VoiceIpRule");
-
-    AnscTraceInfo(("%s: Calling sysevent firewall-restart\n", __FUNCTION__));
-    sysevent_set(syseventFd, syseventToken, "firewall-restart", "", 0);
-    sysevent_close(syseventFd, syseventToken);
-}
-
-static uint8_t cbSetFirewallRule(VoiceFirewallRuleType *pFirewallRule)
-{
-    char command[1000] = { 0 };
-    char protocol[10] = "UDP";
-
-    /* Default all protocol to UDP except TCP.  Do not support "TCP or UDP" option. */
-    if (!strcmp("TCP", pFirewallRule->protocol))
-    {
-       strcpy(protocol, "TCP");
-    }
-
-    AnscTraceInfo(("%s: enable=%d, ifName=%s, protocol=%s, destPort=%u\n",
-                   __FUNCTION__, pFirewallRule->enable,
-                   pFirewallRule->ifName,
-                   protocol,
-                   pFirewallRule->destinationPort));
-    if (pFirewallRule->enable)
-    {
-       snprintf(command, sizeof(command), "-A INPUT -p %s -i %s --dport %u -j ACCEPT",
-                protocol, pFirewallRule->ifName, pFirewallRule->destinationPort);
-    }
-    setSysevent(command, pFirewallRule->enable);
-    return 1;
-}
-
-static uint8_t cbGetCertInfo(VoiceCertificateInfoType *pCertInfo)
-{
-    UNREFERENCED_PARAMETER(pCertInfo);
-
-    return 0;
-}
-
-
-void
-CosaDmlNotifyIf(char *pIpAddr)
-{
-    VoiceInterfaceInfoType sysIfaceInfo = { 0 };
-
-    // Fill interface info
-    sysIfaceInfo.isPhyUp = TRUE;
-    strncpy(sysIfaceInfo.intfName, voiceInterface, sizeof(sysIfaceInfo.intfName));
-    if (strchr(pIpAddr, '.'))
-    {
-        sysIfaceInfo.isIpv4Up = TRUE;
-        strncpy(sysIfaceInfo.ipv4Addr, pIpAddr, sizeof(sysIfaceInfo.ipv4Addr));
-    }
-    else
-    {
-        sysIfaceInfo.isIpv6Up = TRUE;
-        strncpy(sysIfaceInfo.ipv6GlobalAddr, pIpAddr, sizeof(sysIfaceInfo.ipv6GlobalAddr));
-    }
-
-	// Fill DHCP options
-    fillDhcpOptionsV4(&sysIfaceInfo);
-	fillDhcpOptionsV6(&sysIfaceInfo);
-
-    // Call interface info notification
-	AnscTraceInfo(("Calling voice_hal_interface_info_notify...\n"));
-
-    /* Call HAL API */
-    voice_hal_interface_info_notify(&sysIfaceInfo);
-}
 /*
  * @brief Set the voice interface name in brcm based on syscfg value.
     * If the syscfg value is not set, default to "mta0".
     * If the default interface name from bcm is different from the syscfg value, update it in bcm using setParameterValues API.
 */
-
 void setVoiceIfname(void)
 {
     char cVoiceSupportIfaceName[32] = { 0 };
@@ -956,7 +850,123 @@ void setVoiceIfname(void)
     }
 }
 
-#endif
+/*
+ * @brief Set firewall rule for voice interface using sysevent. If pCommand is NULL or empty, the firewall rule will be removed.
+*/
+static void setFirewallRule(char * pCommand, uint8_t ui8Enable)
+{
+    int syseventFd = -1;
+    token_t syseventToken;
+
+    syseventFd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "Firewall", &syseventToken);
+    if (syseventFd < 0)
+    {
+        AnscTraceError(("%s:%d - sysevent_open failed\n", __FUNCTION__, __LINE__));
+        return;
+    }
+
+    AnscTraceInfo(("%s: ui8Enable=%d\n", __FUNCTION__, ui8Enable));
+    AnscTraceInfo(("%s: Calling sysevent command: %s\n", __FUNCTION__, pCommand));
+    if (ui8Enable)
+    {
+        if (NULL == pCommand || '\0' == pCommand[0])
+        {
+            AnscTraceError(("%s: Invalid command string\n", __FUNCTION__));
+            sysevent_close(syseventFd, syseventToken);
+            return;
+        }
+        sysevent_set(syseventFd, syseventToken, "VoiceIpRule", pCommand, 0);
+    }
+    else
+        sysevent_unset(syseventFd, syseventToken, "VoiceIpRule");
+
+    AnscTraceInfo(("%s: Calling sysevent firewall-restart\n", __FUNCTION__));
+    sysevent_set(syseventFd, syseventToken, "firewall-restart", "", 0);
+    sysevent_close(syseventFd, syseventToken);
+}
+
+static char voiceInterface[32] = { 0 };
+
+static uint8_t cbSubsIfInfo(char *pIntfName, uint8_t enable)
+{
+    if (enable)
+    {
+        /* Save voice interface selection */
+        strncpy(voiceInterface, pIntfName, sizeof(voiceInterface));
+    }
+
+    return 1;
+}
+
+static uint8_t cbGetCertInfo(VoiceCertificateInfoType *pCertInfo)
+{
+    UNREFERENCED_PARAMETER(pCertInfo);
+
+    return 0;
+}
+
+static uint8_t cbSetFirewallRule(VoiceFirewallRuleType *pFirewallRule)
+{
+    char command[1000] = { 0 };
+    char protocol[10] = "UDP";
+
+    /* Default all protocol to UDP except TCP.  Do not support "TCP or UDP" option. */
+    if (!strcmp("TCP", pFirewallRule->protocol))
+    {
+       snprintf(protocol, sizeof(protocol), "%s", "TCP");
+    }
+
+    AnscTraceInfo(("%s: enable=%d, ifName=%s, protocol=%s, destPort=%u\n",
+                   __FUNCTION__, pFirewallRule->enable,
+                   pFirewallRule->ifName,
+                   protocol,
+                   pFirewallRule->destinationPort));
+    if (pFirewallRule->enable)
+    {
+       snprintf(command, sizeof(command), "-A INPUT -p %s -i %s --dport %u -j ACCEPT",
+                protocol, pFirewallRule->ifName, pFirewallRule->destinationPort);
+    }
+    setFirewallRule(command, pFirewallRule->enable);
+    return 1;
+}
+
+
+#endif /* VOICE_MTA_SUPPORT */
+
+//Commend out the broadcom patch changes for now, will be requried to test basic voice functionality supported by broadcom.
+#if 0 //defined (VOICE_MTA_SUPPORT)
+
+void
+CosaDmlNotifyIf(char *pIpAddr)
+{
+    VoiceInterfaceInfoType sysIfaceInfo = { 0 };
+
+    // Fill interface info
+    sysIfaceInfo.isPhyUp = TRUE;
+    strncpy(sysIfaceInfo.intfName, voiceInterface, sizeof(sysIfaceInfo.intfName));
+    if (strchr(pIpAddr, '.'))
+    {
+        sysIfaceInfo.isIpv4Up = TRUE;
+        strncpy(sysIfaceInfo.ipv4Addr, pIpAddr, sizeof(sysIfaceInfo.ipv4Addr));
+    }
+    else
+    {
+        sysIfaceInfo.isIpv6Up = TRUE;
+        strncpy(sysIfaceInfo.ipv6GlobalAddr, pIpAddr, sizeof(sysIfaceInfo.ipv6GlobalAddr));
+    }
+
+	// Fill DHCP options
+    fillDhcpOptionsV4(&sysIfaceInfo);
+	fillDhcpOptionsV6(&sysIfaceInfo);
+
+    // Call interface info notification
+	AnscTraceInfo(("Calling voice_hal_interface_info_notify...\n"));
+
+    /* Call HAL API */
+    voice_hal_interface_info_notify(&sysIfaceInfo);
+}
+
+#endif /* VOICE_MTA_SUPPORT */
 ANSC_STATUS
 CosaDmlMTAInit
     (
@@ -973,11 +983,20 @@ CosaDmlMTAInit
 
     if ( mta_hal_InitDB() == RETURN_OK )
 	{
-#if defined (SCXF10)
-		AnscTraceInfo(("CosaDmlMTAInit: voice_hal_register_cb() \n"));
-        setVoiceIfname();
-		/* Register callback functions */
-		voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo);
+#if defined (VOICE_MTA_SUPPORT)
+        char cPartnerId[64] = { 0 };
+        syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
+        if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
+        {
+		    AnscTraceInfo(("CosaDmlMTAInit: voice_hal_register_cb() \n"));
+            setVoiceIfname();
+		    /* Register callback functions */
+		    voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo);
+        }
+        else
+        {
+            AnscTraceInfo(("CosaDmlMTAInit: Not registering callbacks since partnerId is %s\n", cPartnerId));
+        }
 #endif
         return ANSC_STATUS_SUCCESS;
     }

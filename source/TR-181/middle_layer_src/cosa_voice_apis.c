@@ -189,7 +189,7 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
 
     //Read the mac address from platform_hal_GetMTAMacAddress API once it is implemented
     readMacAddress(cMtaInterfaceMac);
-    if (strlen(cMtaInterfaceMac) == 0 || cMtaInterfaceMac[0] == '\0') {
+    if (cMtaInterfaceMac[0] == '\0') {
         CcspTraceError(("%s: readMacAddress failed to get MAC address\n", __FUNCTION__));
         return -1;
     }
@@ -202,7 +202,7 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
     {
         //Create the macVlan
         CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, pVoiceSupportIfaceName, cMtaInterfaceMac));
-        char cCmd[2048] = {0};
+        char cCmd[128] = {0};
         snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, pVoiceSupportIfaceName);
         system(cCmd);
         snprintf(cCmd, sizeof(cCmd), "ip link set dev %s address %s", pVoiceSupportIfaceName, cMtaInterfaceMac);
@@ -230,47 +230,50 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
  */
 void startVoiceFeature(void)
 {
-    static bool isVoiceFeatureStarted = false;
+
     char cVoiceSupportEnabled[8] = {0};
     char cVoiceSupportMode[32] = {0};
     char cVoiceSupportIfaceName[32] = {0};
 
-    if (false == isVoiceFeatureStarted)
+
+    syscfg_get(NULL, "VoiceSupport_IfaceName",cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
+    syscfg_get(NULL, "VoiceSupport_Mode",cVoiceSupportMode, sizeof(cVoiceSupportMode));
+    syscfg_get(NULL, "VoiceSupport_Enabled", cVoiceSupportEnabled, sizeof(cVoiceSupportEnabled));
+
+    if (cVoiceSupportEnabled[0] == '\0' || strcmp(cVoiceSupportEnabled, "true") != 0)
     {
-        syscfg_get(NULL, "VoiceSupport_IfaceName",cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
-        syscfg_get(NULL, "VoiceSupport_Mode",cVoiceSupportMode, sizeof(cVoiceSupportMode));
-        syscfg_get(NULL, "VoiceSupport_Enabled", cVoiceSupportEnabled, sizeof(cVoiceSupportEnabled));
+        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
+        return;
+    }
 
-        if (cVoiceSupportEnabled[0] == '\0' || strcmp(cVoiceSupportEnabled, "true") != 0)
-        {
-            CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
-            return;
-        }
+    if (cVoiceSupportIfaceName[0] == '\0')
+    {
+        CcspTraceWarning(("%s:%d, VoiceSupport_IfaceName not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
+        snprintf(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "mta0");
+    }
 
-        if (cVoiceSupportIfaceName[0] == '\0')
-        {
-            CcspTraceError(("%s:%d, VoiceSupport_IfaceName not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
-            snprintf(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "mta0");
-        }
+    if (cVoiceSupportMode[0] == '\0')
+    {
+        CcspTraceWarning(("%s:%d, VoiceSupport_Mode not set in syscfg, using default Dual_Stack\n", __FUNCTION__, __LINE__));
+        snprintf(cVoiceSupportMode, sizeof(cVoiceSupportMode), VOICE_SUPPORT_MODE_DUAL_STACK);
+    }
 
-        if (createMtaInterface(cVoiceSupportIfaceName) == 0)
-        {
-            CcspTraceInfo(("%s:%d, MTA interface created successfully\n", __FUNCTION__, __LINE__));
-        } else {
-            CcspTraceError(("%s:%d, Failed to create MTA interface\n", __FUNCTION__, __LINE__));
-            return;
-        }
-        subscribeDhcpClientEvents();
+    if (createMtaInterface(cVoiceSupportIfaceName) == 0)
+    {
+        CcspTraceInfo(("%s:%d, MTA interface created successfully\n", __FUNCTION__, __LINE__));
+    } else {
+        CcspTraceError(("%s:%d, Failed to create MTA interface\n", __FUNCTION__, __LINE__));
+        return;
+    }
+    subscribeDhcpClientEvents();
 
-        if (0 == strcmp(cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cVoiceSupportMode, VOICE_SUPPORT_MODE_DUAL_STACK))
-        {
-            CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface\n", __FUNCTION__, __LINE__));
-            if (false == isIfaceHasIp(cVoiceSupportIfaceName))
-                enableDhcpv4ForMta(cVoiceSupportIfaceName);
-        } else {
-            CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
-        }
-        isVoiceFeatureStarted = true;
+    if (0 == strcmp(cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY) || 0 == strcmp(cVoiceSupportMode, VOICE_SUPPORT_MODE_DUAL_STACK))
+    {
+        CcspTraceInfo(("%s:%d, Starting udhcpc on MTA interface\n", __FUNCTION__, __LINE__));
+        if (false == isIfaceHasIp(cVoiceSupportIfaceName))
+            enableDhcpv4ForMta(cVoiceSupportIfaceName);
+    } else {
+        CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
     }
 }
 /*
@@ -292,15 +295,26 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
 
     char cParamName[256] = {0};
     struct in_addr ipAddr = {0}, netMask = {0}, networkAddr = {0};
+    int iNetRet = 0;
 
-    inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, &ipAddr);
-    inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, &netMask);
+    iNetRet = inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, &ipAddr);
+    if (iNetRet != 1)
+    {
+        CcspTraceError(("%s:%d, inet_pton failed for IP address %s with error code %d\n", __FUNCTION__, __LINE__, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, iNetRet));
+        return;
+    }
+    iNetRet = inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, &netMask);
+    if (iNetRet != 1)
+    {
+        CcspTraceError(("%s:%d, inet_pton failed for netmask %s with error code %d\n", __FUNCTION__, __LINE__, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, iNetRet));
+        return;
+    }
     networkAddr.s_addr = ipAddr.s_addr & netMask.s_addr;
 
     char cNetworkAddr[32] = {0};
     char cNetworkAddrWithCidr[64] = {0};
     inet_ntop(AF_INET, &networkAddr, cNetworkAddr, sizeof(cNetworkAddr));
-    //Calulate CIDR notation
+    //calculate CIDR notation
     CcspTraceInfo(("%s:%d, Network Address:%s\n",__FUNCTION__,__LINE__,cNetworkAddr));
     snprintf(cNetworkAddrWithCidr, sizeof(cNetworkAddrWithCidr), "%s/%d", cNetworkAddr, __builtin_popcount(ntohl(netMask.s_addr)));
     CcspTraceInfo(("%s:%d, Network Address in CIDR notation:%s\n",__FUNCTION__,__LINE__,cNetworkAddrWithCidr));
@@ -378,6 +392,9 @@ static int getOption122_SubOptions(uint8_t *pOption122Data, uint16_t iOption122L
         uint8_t ui8SubOption = pOption122Data[ui16Position];
         uint8_t ui8SubOptionLen = pOption122Data[ui16Position + 1];
 
+        CcspTraceInfo(("%s:%d, SubOption:%u, SubOption Length:%u\n", __FUNCTION__, __LINE__, ui8SubOption, ui8SubOptionLen));
+        CcspTraceInfo(("%s:%d, ui16Position:%d\n",__FUNCTION__, __LINE__, ui16Position));
+
         if (ui16Position + 2 + ui8SubOptionLen > iOption122Len)
         {
             CcspTraceError(("%s: Malformed Option 122 data\n", __FUNCTION__));
@@ -397,7 +414,7 @@ static int getOption122_SubOptions(uint8_t *pOption122Data, uint16_t iOption122L
 }
 
 /*
- *@breif This function initializes the voice support related parameters based on DHCP event data
+ *@brief This function initializes the voice support related parameters based on DHCP event data
  *@param pDhcpEvtData - Pointer to the DHCP event data structure
 */
 
@@ -408,36 +425,6 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
         CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
         return;
     }
-#if 0
-typedef struct
-{ 
-  char    intfName[VOICE_IFNAME_LEN];               
-  uint8_t isPhyUp;                                  /* link state (1=up) */
-  
-  /* DHCPv4 */
-  uint8_t isIpv4Up;                                 /* IPv4 address valid */
-  char    ipv4Addr[VOICE_IPV4_ADDR_LEN];            /* IP or CIDR, e.g., "192.0.2.10/24" */
-  char    v4NextServerIp[VOICE_IPV4_ADDR_LEN];      /* BOOTP siaddr */
-  char    v4ServerHostName[VOICE_STRMAX_128];       /* BOOTP sname or opt 66 */
-  char    v4BootFileName[VOICE_STRMAX_128];         /* BOOTP file or opt 67 */
-  char    v4DnsServers[VOICE_IPV4_ADDR_LEN*4];      /* opt 6, comma-separated */
-  char    v4LogServerIp[VOICE_IPV4_ADDR_LEN];       /* opt 7 (syslog), if present */
-  char    v4HostName[VOICE_STRMAX_128];             /* opt 12 */
-  char    v4DomainName[VOICE_STRMAX_128];           /* opt 15 */
-  char    v4ProvServer[VOICE_STRMAX_128];           /* PacketCable v4: Opt122 subopt 3 (IPv4/FQDN) */
-  
-  /* DHCPv6 */
-  uint8_t isIpv6Up;                                 /* at least one global IPv6 present */
-  char    ipv6GlobalAddr[VOICE_IPV6_ADDR_LEN];      /* preferred global address */
-  char    v6TftpServerIp[VOICE_IPV6_ADDR_LEN];      /* Opt17 subopt 32 (IPv6) */
-  char    v6TftpFileName[VOICE_STRMAX_128];         /* Opt17 subopt 33 */
-  char    v6SyslogServerIp[VOICE_IPV6_ADDR_LEN];    /* Opt17 subopt 34 (IPv6) */
-  char    v6ProvServerIp[VOICE_STRMAX_128];         /* Opt17 subopt 2171:3 (IPv6/FQDN/IPv4 as text) */
-  char    v6DnsServers[VOICE_IPV6_ADDR_LEN*4];      /* opt 23, comma-separated */
-  char    v6DomainName[VOICE_STRMAX_128];           /* opt 24 (first decoded name) */
-  char    v6ClientFqdn[VOICE_STRMAX_128];           /* opt 39 (decoded FQDN) */
-} VoiceInterfaceInfoType;
-#endif
     VoiceInterfaceInfoType sVoiceInterfaceInfoType = {0};
     snprintf(sVoiceInterfaceInfoType.intfName, sizeof(sVoiceInterfaceInfoType.intfName), "%s", pDhcpEvtData->cIfaceName);
     sVoiceInterfaceInfoType.isPhyUp = 1;
@@ -487,7 +474,6 @@ typedef struct
         memcpy(sVoiceInterfaceInfoType.v4ProvServer, pSubOptData, iCopyLen);
         sVoiceInterfaceInfoType.v4ProvServer[iCopyLen] = '\0';
         CcspTraceInfo(("%s:%d, Retrieved Option122 SubOption 3 for Provisioning Server: %s and len:%u\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ProvServer, ui8SubOptionLen));
-        CcspTraceInfo(("%s:%d, Option122 SubOption 3 in hex: ", __FUNCTION__, __LINE__));
         char cHexBuf[256] = {0};
         long unsigned int uiPos = 0;
         for (int i = 0; i < ui8SubOptionLen && uiPos < sizeof(cHexBuf) - 3; i++) {
@@ -544,10 +530,8 @@ void * dhcpClientEventsHandlerThread(void * pArg)
         return NULL;
     }
     
-    pthread_mutex_lock(&voiceDataProcessingMutex);
     CcspTraceInfo(("%s:%d, DHCP Client Events Handler Thread started\n", __FUNCTION__, __LINE__));
     DhcpEventData_t *pDhcpEvtData = (DhcpEventData_t *)pArg;
-    pthread_detach(pthread_self());
 
     if (DHCP_IPv4 == pDhcpEvtData->dhcpVersion)
     {
@@ -560,7 +544,9 @@ void * dhcpClientEventsHandlerThread(void * pArg)
             case DHCP_LEASE_UPDATE:
             case DHCP_CLIENT_FAILED:
             {
+                pthread_mutex_lock(&voiceDataProcessingMutex);
                 processVoiceDhcpEvent((DhcpEventData_t *)pDhcpEvtData);
+                pthread_mutex_unlock(&voiceDataProcessingMutex);
                 break;
             }
 
@@ -574,7 +560,5 @@ void * dhcpClientEventsHandlerThread(void * pArg)
         CcspTraceError(("%s: Unsupported DHCP version %d\n", __FUNCTION__, pDhcpEvtData->dhcpVersion));
     }
     free(pDhcpEvtData);
-    pthread_mutex_unlock(&voiceDataProcessingMutex);
     pthread_exit(NULL);
-    return NULL;
 }

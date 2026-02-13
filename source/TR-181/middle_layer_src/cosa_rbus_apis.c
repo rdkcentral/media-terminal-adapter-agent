@@ -21,6 +21,7 @@
 #include "ccsp_psm_helper.h"
 #include "cosa_rbus_apis.h"
 #include "cosa_voice_apis.h"
+#include "syscfg/syscfg.h"
 
 
 #define  DHCPv4_VOICE_SUPPORT_PARAM "dmsb.voicesupport.Interface.IP.DHCPV4Interface"
@@ -32,7 +33,7 @@ extern  ANSC_HANDLE  bus_handle;
 const char cSubsystem[ ]= "eRT.";
 static char cBaseParam[32] = {0};
 
-/*
+/**
 * @brief Convert parameter value type to rbus value type.
 *
 * @param[in] paramType  Parameter value type to be converted.
@@ -57,8 +58,8 @@ static rbusValueType_t convertRbusDataType(paramValueType_t paramType)
     return rbusType;
 }
 
-/*
-* @brief Set parameter in DHCP manager via RBUS.
+/**
+ * @brief Set parameter in DHCP manager via RBUS.
  *
  * This function sets the specified parameter in the DHCP manager
  * using RBUS. It constructs an rbus value from the provided parameter
@@ -105,8 +106,8 @@ static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue,
     rbusValue_Release(rbusValue);
 }
 
-/*
-* @brief Retrieve interface index information for the MTA interface.
+/**
+ * @brief Retrieve interface index information for the MTA interface.
  *
  * This function retrieves Interface index information for the MTA interface
  * from the PSM (Persistent Storage Manager) and logs the retrieved value.
@@ -125,13 +126,23 @@ void getIfaceIndexInfo(void)
     {
         CcspTraceError(("%s: PSM_Get_Record_Value2 failed for param %s with error code %d\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM,
             iRetPsmGet));
+        /* Set a safe default base parameter to avoid constructing invalid RBUS paths later. */
+        snprintf(cBaseParam, sizeof(cBaseParam), "%s", DHCP_MGR_DHCPv4_TABLE);
         return;
     }
     else
     {
         CcspTraceInfo(("%s: PSM_Get_Record_Value2 successful for param %s with value %s\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM,
             pParamValue));
-        snprintf(cBaseParam, sizeof(cBaseParam), "%s",pParamValue);
+        if (strlen(pParamValue) == 0)
+        {
+            CcspTraceWarning(("%s: Retrieved empty value for param %s, using default base parameter\n", __FUNCTION__, DHCPv4_VOICE_SUPPORT_PARAM));
+            snprintf(cBaseParam, sizeof(cBaseParam), "%s", DHCP_MGR_DHCPv4_TABLE);
+        }
+        else
+        {
+            snprintf(cBaseParam, sizeof(cBaseParam), "%s",pParamValue);
+        }
         ((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc((char *)pParamValue);
     }
 }
@@ -176,12 +187,20 @@ void initRbusHandle(void)
 void enableDhcpv4ForMta(const char * pIfaceName)
 {
     char cParamName[64] = {0};
+    char cPartnerId[64] = { 0 };
+    syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
+    if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
+    {
+        snprintf(cParamName, sizeof(cParamName), "%s.Interface", cBaseParam);
+        setParamInDhcpMgr(cParamName, pIfaceName, STRING_PARAM);
 
-    snprintf(cParamName, sizeof(cParamName), "%s.Interface", cBaseParam);
-    setParamInDhcpMgr(cParamName, pIfaceName, STRING_PARAM);
-
-    snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
-    setParamInDhcpMgr(cParamName, "true", BOOLEAN_PARAM);
+        snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
+        setParamInDhcpMgr(cParamName, "true", BOOLEAN_PARAM);
+    }
+    else
+    {
+        CcspTraceInfo(("%s: Partner ID:%s is not Comcast, skipping DHCPv4 configuration\n", __FUNCTION__, cPartnerId));
+    }
 }
 /**
  * @brief DHCP client events handler for MTA interface.
@@ -205,7 +224,7 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
     }
     CcspTraceInfo(("%s: Received event %s\n", __FUNCTION__, pRbusEvent->name));
 
-    pthread_t dhcpEventThreadId = -1;
+    pthread_t dhcpEventThreadId;
 
     if(strstr(pRbusEvent->name, DHCP_MGR_DHCPv4_TABLE) || strstr(pRbusEvent->name, DHCP_MGR_DHCPv6_TABLE))
     {
@@ -367,6 +386,7 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
             free(pDhcpEvtData);
             return;
         }
+        pthread_detach(dhcpEventThreadId);
         usleep(10000); // Sleep for 10ms to allow thread to start
     }
     else
@@ -410,7 +430,7 @@ void * eventSubscriptionThread(void * pArg)
     {
         CcspTraceInfo(("%s: rbus_event_subscribe successful for event %s\n", __FUNCTION__, rbusEventSubscription.eventName));
     }
-    return NULL;
+    pthread_exit(NULL);
 }
 /**
  * @brief Subscribe to DHCP client events for MTA interface.

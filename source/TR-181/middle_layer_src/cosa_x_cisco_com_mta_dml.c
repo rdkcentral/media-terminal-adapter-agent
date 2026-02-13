@@ -77,9 +77,10 @@
 #include "messagebus_interface_helper.h"
 #include "syscfg/syscfg.h"
 
-#if defined (SCXF10)
+//Commend out the broadcom patch changes for now, will be requried to test basic voice functionality supported by broadcom.
+#if 0 //defined (VOICE_MTA_SUPPORT)
 #include "bcm_generic_hal.h"
-#endif
+#endif /* VOICE_MTA_SUPPORT */
 
 extern ULONG g_currentBsUpdate;
 
@@ -8241,7 +8242,8 @@ X_RDKCENTRAL_COM_MTA_SetParamBoolValue
 	return FALSE;
 }
 
-#if defined (SCXF10)
+//Commend out the broadcom patch changes for now, will be requried to test basic voice functionality supported by broadcom.
+#if 0 //defined (VOICE_MTA_SUPPORT)
 static ULONG getParamString
     (
         char *fullpath,
@@ -8484,4 +8486,4 @@ BrcmVoiceService_NotifyIfIp_SetParamStringValue
 
    return FALSE;
 }
-#endif
+#endif /* VOICE_MTA_SUPPORT */

@@ -27,6 +27,6 @@ libCcspMtaAgent_middle_layer_src_la_CPPFLAGS = -I$(top_srcdir)/source/TR-181/boa
 libCcspMtaAgent_middle_layer_src_la_SOURCES = cosa_x_cisco_com_mta_internal.c plugin_main.c plugin_main_apis.c cosa_x_cisco_com_mta_dml.c ../../MtaAgentSsp/TR104_webconfig.c
 libCcspMtaAgent_middle_layer_src_la_LDFLAGS = -lccsp_common -lhal_mta -lmsgpackc
 
-if VOICE_SUPPORT_ENABLED
+if VOICE_MTA_SUPPORT
 libCcspMtaAgent_middle_layer_src_la_SOURCES += cosa_rbus_apis.c cosa_voice_apis.c
 endif

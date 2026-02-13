@@ -2639,7 +2639,7 @@
             </parameters>
       </object>
 
-<?ifdef FEATURE_SUPPORT_VOICE_MTA?>
+<?ifdef VOICE_MTA_SUPPORT?>
       <object><name>Services</name><objectType>object</objectType>
         <objects><object><name>BrcmVoiceService</name><objectType>object</objectType>
 
