@@ -328,11 +328,6 @@ typedef enum
 /**********************************************************************
                 FUNCTION PROTOTYPES
 **********************************************************************/
-//Commend out the broadcom patch changes for now, will be requried to test basic voice functionality supported by broadcom.
-#if 0 //defined (VOICE_MTA_SUPPORT)
-void
-CosaDmlNotifyIf(char *pIpAddr);
-#endif
 
 ANSC_STATUS
 CosaDmlMTAInit
