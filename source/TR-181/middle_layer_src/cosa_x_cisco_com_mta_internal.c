@@ -77,6 +77,10 @@
 #include "mta_hal.h"
 #include <sysevent/sysevent.h>
 #include "syscfg/syscfg.h"
+#if defined (VOICE_MTA_SUPPORT)
+#include "cosa_rbus_apis.h"
+#include "cosa_voice_apis.h"
+#endif
 
 #define MAX_BUFF_SIZE 128
 #define MAX_IP_PREF_VAL 6
@@ -85,6 +89,7 @@
 
 static int sysevent_fd;
 static token_t sysevent_token;
+
 /**********************************************************************
 
     caller:     owner of the object
@@ -621,6 +626,50 @@ void WaitForDhcpOption()
  	}
  	CcspTraceInfo(("%s Didn't receive dhcp options in %d sec, initializing mta with default values \n",__FUNCTION__,maxCount));
 }
+#if defined (VOICE_MTA_SUPPORT)
+/*
+ @brief This thread listens to the sysevent notifications for wan state and initializes the voice when wan is up.
+*/
+void * voiceSyseventThread(void * hThisObject)
+{
+	(void)hThisObject;
+
+	int iError = -1;
+	char cCurrWanState[8] = {0};
+	char cEventName[32]={0}, cEventVal[32]={0};
+	async_id_t wanStateAsyncId;
+
+	sysevent_set_options(sysevent_fd, sysevent_token, "current_wan_state", TUPLE_FLAG_EVENT);
+	sysevent_setnotification(sysevent_fd, sysevent_token, "current_wan_state",  &wanStateAsyncId);
+	CcspTraceInfo(("%s Registered for sysevent notifications for current_wan_state \n",__FUNCTION__));
+
+	sysevent_get(sysevent_fd, sysevent_token, "current_wan_state", cCurrWanState, sizeof(cCurrWanState));
+
+	if (0 == strcasecmp(cCurrWanState, "up"))
+	{
+		CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Interface \n",__FUNCTION__,__LINE__));
+		startVoiceFeature();
+	}
+	do
+	{
+		int iEventNameLen = sizeof(cEventName);
+		int iEventValLen = sizeof(cEventVal);
+		memset(cEventName, 0, iEventNameLen);
+		memset(cEventVal, 0, iEventValLen);
+		iError = sysevent_getnotification(sysevent_fd, sysevent_token, cEventName, &iEventNameLen, cEventVal, &iEventValLen, &wanStateAsyncId);
+		if (0 == iError)
+		{
+			CcspTraceWarning(("%s Recieved notification event  %s, state %s\n",__FUNCTION__,cEventName,cEventVal));
+			if (0 == strcmp(cEventName, "current_wan_state") && 0 == strcasecmp(cEventVal, "up"))
+			{
+				CcspTraceWarning(("%s:%d, current_wan_state up, Initializing voice MTA Interface \n",__FUNCTION__,__LINE__));
+				startVoiceFeature();
+			}
+		}
+	} while (TRUE);
+	return NULL;
+}
+#endif
 
 /*Coverity Fix CID 121026 Arg Type MisMatch */
 void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject)
@@ -1367,7 +1416,6 @@ void * Mta_Sysevent_thread(void *  hThisObject)
 
 }
 
-
 /**********************************************************************
 
     caller:     self
@@ -1407,12 +1455,41 @@ CosaMTAInitialize
 
     //Starting thread to monitor Wan mode and wan status
     CcspTraceInfo(("%s %d Starting sysevent thread \n", __FUNCTION__, __LINE__));
-#ifdef ENABLE_ETH_WAN
+#if defined(VOICE_MTA_SUPPORT)
+/*
+ * Note:
+ *  - getIfaceIndexInfo() uses PSM (not RBUS) to retrieve interface index
+ *    information and populate parameters such as cBaseParam.
+ *  - These parameters are later used when making RBUS calls after
+ *    initRbusHandle() completes.
+ *
+ * Therefore, getIfaceIndexInfo() is intentionally called before
+ * initRbusHandle() so that all required configuration is available
+ * by the time RBUS is initialized and RBUS calls are performed.
+*/
+
+    getIfaceIndexInfo();
+	initRbusHandle();
+    sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
+	pthread_t voiceMtaInit;
+	if (sysevent_fd < 0)
+	{
+		CcspTraceError(("%s: Failed to open sysevent connection\n", __FUNCTION__));
+		return ANSC_STATUS_FAILURE;
+	}
+	CcspTraceInfo(("%s:%d, Starting sysevent thread for Voice Mta\n", __FUNCTION__, __LINE__));
+	if (0 != pthread_create(&voiceMtaInit, NULL, &voiceSyseventThread, (ANSC_HANDLE) hThisObject))
+	{
+		CcspTraceError(("%s: Failed to create Voice Mta sysevent thread\n", __FUNCTION__));
+	}
+#elif defined(ENABLE_ETH_WAN)
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
     pthread_t MtaInit;
 #if defined (EROUTER_DHCP_OPTION_MTA)
+    CcspTraceInfo(("%s %d Starting sysevent thread for DHCP option 122/2171 \n", __FUNCTION__, __LINE__));
     pthread_create(&MtaInit, NULL, &Mta_Sysevent_thread_Dhcp_Option, (ANSC_HANDLE) hThisObject);
 #else
+    CcspTraceInfo(("%s %d Starting sysevent thread for WAN state \n", __FUNCTION__, __LINE__));
     pthread_create(&MtaInit, NULL, &Mta_Sysevent_thread, (ANSC_HANDLE) hThisObject);
 #endif
     //  CosaMTAInitializeEthWanProv(hThisObject);
@@ -1462,6 +1539,34 @@ CosaMTARemove
 
     return returnStatus;
 }
-
+/*
+ *@brief This function get the wan interface name from sysevent
+ *@param pIfname - pointer to store the wan interface name
+ *@param iIfnameLen - length of the pointer
+ *@return ANSC_STATUS_SUCCESS on success else ANSC_STATUS_FAILURE
+*/
+ANSC_STATUS getWanIfaceName(char *pIfname, int iIfnameLen)
+{
+    ANSC_STATUS  returnStatus = ANSC_STATUS_FAILURE;
+    if (!pIfname || iIfnameLen <= 0)
+    {
+        CcspTraceError(("%s: Invalid parameters\n", __FUNCTION__));
+        return returnStatus;
+    }
+    if (sysevent_fd > 0)
+    {
+        if (0 != sysevent_get(sysevent_fd, sysevent_token, "wan_ifname", pIfname, iIfnameLen))
+        {
+            CcspTraceError(("%s: sysevent_get wan_ifname failed\n", __FUNCTION__));
+            returnStatus = ANSC_STATUS_FAILURE;
+        }
+        else
+        {
+            CcspTraceInfo(("%s: sysevent_get wan_ifname=%s\n", __FUNCTION__, pIfname));
+            returnStatus = ANSC_STATUS_SUCCESS;
+        }
+    }
+    return returnStatus;
+}
 
 //#endif

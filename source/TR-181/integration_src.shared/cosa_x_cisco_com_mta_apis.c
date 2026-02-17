@@ -77,6 +77,10 @@
 #include "safec_lib_common.h"
 #include "sysevent/sysevent.h"
 #include "ctype.h"
+#if defined (VOICE_MTA_SUPPORT)
+#include "voice_dhcp_hal.h"
+#include "bcm_generic_hal.h"
+#endif
 
 
 // #include "cosa_x_cisco_com_mta_internal.h"
@@ -164,6 +168,145 @@ int mtaReapplytr104Conf(void)
 
 #endif // MTA_TR104SUPPORT
 
+#if defined (VOICE_MTA_SUPPORT)
+
+/*
+ * @brief Set the voice interface name in brcm based on syscfg value.
+    * If the syscfg value is not set, default to "mta0".
+    * If the default interface name from bcm is different from the syscfg value, update it in bcm using setParameterValues API.
+*/
+void setVoiceIfname(void)
+{
+    char cVoiceSupportIfaceName[32] = { 0 };
+    syscfg_get(NULL, "VoiceSupport_IfaceName",cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
+    AnscTraceInfo(("%s:%d, VoiceSupport_IfaceName from syscfg is %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
+
+    if (0 == strlen(cVoiceSupportIfaceName))
+    {
+        AnscTraceError(("VoiceSupport_IfaceName is not set in syscfg\n"));
+        snprintf(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "%s", "mta0");
+        AnscTraceInfo(("Defaulting VoiceSupport_IfaceName to %s\n", cVoiceSupportIfaceName));
+    }
+    char cFullpath[256] = "Device.Services.VoiceService.1.X_BROADCOM_COM_BoundIfName";
+    char cValue[128] = { 0 };
+
+    BcmRet rc;
+    char *nameArray[1] = { cFullpath };
+    BcmGenericParamInfo *getParamInfoArray = NULL;
+    UINT32 numParamInfo = 0;
+
+    rc = bcm_generic_getParameterValues((const char **)nameArray, 1, FALSE, 0,
+                                       &getParamInfoArray, &numParamInfo);
+    if (BCMRET_SUCCESS == rc)
+    {
+        if (1 == numParamInfo)
+        {
+            AnscTraceInfo(("%s:%d, Value:%s\n", __FUNCTION__, __LINE__, getParamInfoArray[0].value));
+            snprintf(cValue, sizeof(cValue), "%s", getParamInfoArray[0].value);
+        }
+        bcm_generic_freeParamInfoArray(&getParamInfoArray, numParamInfo);
+    }
+
+    if (BCMRET_SUCCESS != rc || strlen(cValue) == 0 || strcmp(cVoiceSupportIfaceName, cValue) != 0)
+    {
+        BcmGenericParamInfo setParamInfoArray[1] = { 0 };
+
+       /* Fill config structure */
+       setParamInfoArray[0].fullpath = cFullpath;
+       setParamInfoArray[0].type = "string";
+       setParamInfoArray[0].value = cVoiceSupportIfaceName;
+
+       AnscTraceInfo(("%s:%d, Setting %s to %s\n", __FUNCTION__, __LINE__, cFullpath, cVoiceSupportIfaceName));
+       rc = bcm_generic_setParameterValues(setParamInfoArray, 1, 0);
+       if (BCMRET_SUCCESS != rc) {
+          AnscTraceError(("setParamString: bcm_generic_setParameterValues failed for %s\n",
+                      cFullpath));
+       }
+    }
+}
+
+/*
+ * @brief Set firewall rule for voice interface using sysevent. If pCommand is NULL or empty, the firewall rule will be removed.
+*/
+static void setFirewallRule(char * pCommand, uint8_t ui8Enable)
+{
+    int syseventFd = -1;
+    token_t syseventToken;
+
+    syseventFd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "Firewall", &syseventToken);
+    if (syseventFd < 0)
+    {
+        AnscTraceError(("%s:%d - sysevent_open failed\n", __FUNCTION__, __LINE__));
+        return;
+    }
+
+    AnscTraceInfo(("%s: ui8Enable=%d\n", __FUNCTION__, ui8Enable));
+    AnscTraceInfo(("%s: Calling sysevent command: %s\n", __FUNCTION__, pCommand));
+    if (ui8Enable)
+    {
+        if (NULL == pCommand || '\0' == pCommand[0])
+        {
+            AnscTraceError(("%s: Invalid command string\n", __FUNCTION__));
+            sysevent_close(syseventFd, syseventToken);
+            return;
+        }
+        sysevent_set(syseventFd, syseventToken, "VoiceIpRule", pCommand, 0);
+    }
+    else
+        sysevent_unset(syseventFd, syseventToken, "VoiceIpRule");
+
+    AnscTraceInfo(("%s: Calling sysevent firewall-restart\n", __FUNCTION__));
+    sysevent_set(syseventFd, syseventToken, "firewall-restart", "", 0);
+    sysevent_close(syseventFd, syseventToken);
+}
+
+static char voiceInterface[32] = { 0 };
+
+static uint8_t cbSubsIfInfo(char *pIntfName, uint8_t enable)
+{
+    if (enable)
+    {
+        /* Save voice interface selection */
+        strncpy(voiceInterface, pIntfName, sizeof(voiceInterface));
+    }
+
+    return 1;
+}
+
+static uint8_t cbGetCertInfo(VoiceCertificateInfoType *pCertInfo)
+{
+    UNREFERENCED_PARAMETER(pCertInfo);
+
+    return 0;
+}
+
+static uint8_t cbSetFirewallRule(VoiceFirewallRuleType *pFirewallRule)
+{
+    char command[1000] = { 0 };
+    char protocol[10] = "UDP";
+
+    /* Default all protocol to UDP except TCP.  Do not support "TCP or UDP" option. */
+    if (!strcmp("TCP", pFirewallRule->protocol))
+    {
+       snprintf(protocol, sizeof(protocol), "%s", "TCP");
+    }
+
+    AnscTraceInfo(("%s: enable=%d, ifName=%s, protocol=%s, destPort=%u\n",
+                   __FUNCTION__, pFirewallRule->enable,
+                   pFirewallRule->ifName,
+                   protocol,
+                   pFirewallRule->destinationPort));
+    if (pFirewallRule->enable)
+    {
+       snprintf(command, sizeof(command), "-A INPUT -p %s -i %s --dport %u -j ACCEPT",
+                protocol, pFirewallRule->ifName, pFirewallRule->destinationPort);
+    }
+    setFirewallRule(command, pFirewallRule->enable);
+    return 1;
+}
+
+
+#endif /* VOICE_MTA_SUPPORT */
 
 ANSC_STATUS
 CosaDmlMTAInit
@@ -177,8 +320,27 @@ CosaDmlMTAInit
 
    // PCOSA_DATAMODEL_MTA      pMyObject    = (PCOSA_DATAMODEL_MTA)phContext;
 
+	AnscTraceInfo(("CosaDmlMTAInit:  mta_hal_InitDB() \n"));
+
     if ( mta_hal_InitDB() == RETURN_OK )
+	{
+#if defined (VOICE_MTA_SUPPORT)
+        char cPartnerId[64] = { 0 };
+        syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
+        if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
+        {
+		    AnscTraceInfo(("CosaDmlMTAInit: voice_hal_register_cb() \n"));
+            setVoiceIfname();
+		    /* Register callback functions */
+		    voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo);
+        }
+        else
+        {
+            AnscTraceInfo(("CosaDmlMTAInit: Not registering callbacks since partnerId is %s\n", cPartnerId));
+        }
+#endif
         return ANSC_STATUS_SUCCESS;
+    }
     else
         return ANSC_STATUS_FAILURE;
 }
