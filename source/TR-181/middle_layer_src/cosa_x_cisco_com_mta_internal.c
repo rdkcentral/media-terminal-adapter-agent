@@ -660,10 +660,22 @@ void * voiceSyseventThread(void * hThisObject)
 		if (0 == iError)
 		{
 			CcspTraceWarning(("%s Recieved notification event  %s, state %s\n",__FUNCTION__,cEventName,cEventVal));
-			if (0 == strcmp(cEventName, "current_wan_state") && 0 == strcasecmp(cEventVal, "up"))
+			if (0 == strcmp(cEventName, "current_wan_state"))
 			{
-				CcspTraceWarning(("%s:%d, current_wan_state up, Initializing voice MTA Interface \n",__FUNCTION__,__LINE__));
-				startVoiceFeature();
+				if (0 == strcmp(cEventVal, "up"))
+				{
+					CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Interface \n",__FUNCTION__,__LINE__));
+					startVoiceFeature();
+				}
+				else if (0 == strcmp(cEventVal, "down"))
+				{
+					CcspTraceWarning(("%s:%d, current_wan_state down, Deinitializing MTA Interface \n",__FUNCTION__,__LINE__));
+					stopVoiceFeature();
+				}
+				else
+				{
+					CcspTraceWarning(("%s:%d, current_wan_state changed to %s, Ignoring the state change \n",__FUNCTION__,__LINE__, cEventVal));
+				}
 			}
 		}
 	} while (TRUE);
@@ -1555,14 +1567,14 @@ ANSC_STATUS getWanIfaceName(char *pIfname, int iIfnameLen)
     }
     if (sysevent_fd > 0)
     {
-        if (0 != sysevent_get(sysevent_fd, sysevent_token, "wan_ifname", pIfname, iIfnameLen))
+        if (0 != sysevent_get(sysevent_fd, sysevent_token, "current_wan_ifname", pIfname, iIfnameLen))
         {
-            CcspTraceError(("%s: sysevent_get wan_ifname failed\n", __FUNCTION__));
+            CcspTraceError(("%s: sysevent_get current_wan_ifname failed\n", __FUNCTION__));
             returnStatus = ANSC_STATUS_FAILURE;
         }
         else
         {
-            CcspTraceInfo(("%s: sysevent_get wan_ifname=%s\n", __FUNCTION__, pIfname));
+            CcspTraceInfo(("%s: sysevent_get current_wan_ifname=%s\n", __FUNCTION__, pIfname));
             returnStatus = ANSC_STATUS_SUCCESS;
         }
     }
