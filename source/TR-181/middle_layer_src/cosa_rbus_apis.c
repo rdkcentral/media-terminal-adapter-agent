@@ -107,6 +107,61 @@ static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue,
 }
 
 /**
+ * @brief Retrieve parameter value from a component via RBUS.
+ *
+ * This function retrieves the value of the specified parameter from
+ * a component using RBUS. It initializes an rbus value, performs
+ * the get operation, and stores the result in the provided buffer.
+ * Errors during the process are logged appropriately.
+ *
+ * @param[in] pParamName   Name of the parameter to be retrieved.
+ * @param[out] pParamValue Buffer to store the retrieved parameter value.
+ * @param[in] valueSize    Size of the buffer.
+ */
+
+void getParamValue(const char * pParamName, char * pParamValue, size_t valueSize)
+{
+    if (pParamName == NULL || pParamValue == NULL || valueSize == 0 || voiceRbusHandle == NULL)
+    {
+        CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
+        return;
+    }
+    rbusValue_t rbusValue;
+    rbusValue_Init(&rbusValue);
+
+    int iRet = rbus_get(voiceRbusHandle, pParamName, &rbusValue);
+    if (iRet != RBUS_ERROR_SUCCESS)
+    {
+        CcspTraceError(("%s: rbus_get failed for param %s with error code %d\n", __FUNCTION__, pParamName, iRet));
+        rbusValue_Release(rbusValue);
+        return;
+    }
+    if (RBUS_STRING == rbusValue_GetType(rbusValue))
+    {
+        const char * pStrVal = rbusValue_GetString(rbusValue, NULL);
+        if (NULL != pStrVal)
+        {
+            snprintf(pParamValue, valueSize, "%s", pStrVal);
+            CcspTraceInfo(("%s: rbus_get successful for param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+        }
+        else
+        {
+            CcspTraceError(("%s: rbus_get returned NULL string for param %s\n", __FUNCTION__, pParamName));
+        }
+    }
+    else if (RBUS_BOOLEAN == rbusValue_GetType(rbusValue))
+    {
+        bool boolVal = rbusValue_GetBoolean(rbusValue);
+        snprintf(pParamValue, valueSize, "%s", boolVal ? "true" : "false");
+        CcspTraceInfo(("%s: rbus_get successful for param %s with boolean value %s\n", __FUNCTION__, pParamName, pParamValue));
+    }
+    else
+    {
+        CcspTraceError(("%s: rbus_get returned non-string type for param %s\n", __FUNCTION__, pParamName));
+    }
+    rbusValue_Release(rbusValue);
+}
+/**
  * @brief Retrieve interface index information for the MTA interface.
  *
  * This function retrieves Interface index information for the MTA interface
@@ -200,6 +255,24 @@ void enableDhcpv4ForMta(const char * pIfaceName)
     else
     {
         CcspTraceInfo(("%s: Partner ID:%s is not Comcast, skipping DHCPv4 configuration\n", __FUNCTION__, cPartnerId));
+    }
+}
+/**
+ *@brief Disable DHCPv4 for the MTA interface.
+ */
+void disableDhcpv4ForMta(void)
+{
+    char cParamName[64] = {0};
+    char cPartnerId[64] = { 0 };
+    syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
+    if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
+    {
+        snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
+        setParamInDhcpMgr(cParamName, "false", BOOLEAN_PARAM);
+    }
+    else
+    {
+        CcspTraceInfo(("%s: Partner ID:%s is not Comcast, skipping DHCPv4 disable\n", __FUNCTION__, cPartnerId));
     }
 }
 /**
