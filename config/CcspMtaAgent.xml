@@ -95,7 +95,7 @@
 
           <name>BootFileName</name>
 
-          <type>string(64)</type>
+          <type>string(256)</type>
 
           <syntax>string</syntax>
 
@@ -453,7 +453,7 @@
 
           <name>BootFileName</name>
 
-          <type>string(64)</type>
+          <type>string(256)</type>
 
           <syntax>string</syntax>
 
