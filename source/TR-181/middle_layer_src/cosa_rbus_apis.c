@@ -494,14 +494,20 @@ void * eventSubscriptionThread(void * pArg)
         return NULL;
     }
     CcspTraceInfo(("%s:%d, Subscribing to event %s in event subscription thread\n", __FUNCTION__, __LINE__, rbusEventSubscription.eventName));
-    rbusError_t rbusRet = rbusEvent_SubscribeEx (voiceRbusHandle, &rbusEventSubscription, 1/* Number of subscriptions */, 5 /* retry interval in seconds */);
-    if (rbusRet != RBUS_ERROR_SUCCESS)
+    while (1)
     {
-        CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, rbusEventSubscription.eventName, rbusRet));
-    }
-    else
-    {
-        CcspTraceInfo(("%s: rbus_event_subscribe successful for event %s\n", __FUNCTION__, rbusEventSubscription.eventName));
+        rbusError_t rbusRet = rbusEvent_SubscribeEx (voiceRbusHandle, &rbusEventSubscription, 1 ,0);
+        if (rbusRet != RBUS_ERROR_SUCCESS)
+        {
+            CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, rbusEventSubscription.eventName, rbusRet));
+            CcspTraceError(("%s: Retrying event subscription after 5 seconds...\n", __FUNCTION__));
+            sleep(5);
+        }
+        else
+        {
+            CcspTraceInfo(("%s: rbus_event_subscribe successful for event %s\n", __FUNCTION__, rbusEventSubscription.eventName));
+            break;
+        }
     }
     pthread_exit(NULL);
 }
