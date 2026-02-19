@@ -29,6 +29,9 @@
 #define  DHCP_MGR_DHCPv4_TABLE "Device.DHCPv4.Client"
 #define  DHCP_MGR_DHCPv6_TABLE "Device.DHCPv6.Client"
 
+#define MAX_RETRY_ATTEMPTS 5
+#define RETRY_SLEEP_INCREMENT 2
+
 rbusHandle_t voiceRbusHandle = NULL;
 extern  ANSC_HANDLE  bus_handle;
 const char cSubsystem[ ]= "eRT.";
@@ -121,12 +124,12 @@ static int setParamValue(const char * pParamName, const char * pParamValue, para
  * @param[in] valueSize    Size of the buffer.
  */
 
-void getParamValue(const char * pParamName, char * pParamValue, size_t valueSize)
+static int getParamValue(const char * pParamName, char * pParamValue, size_t valueSize)
 {
     if (pParamName == NULL || pParamValue == NULL || valueSize == 0 || voiceRbusHandle == NULL)
     {
         CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
-        return;
+        return -1;
     }
     rbusValue_t rbusValue;
     rbusValue_Init(&rbusValue);
@@ -136,7 +139,7 @@ void getParamValue(const char * pParamName, char * pParamValue, size_t valueSize
     {
         CcspTraceError(("%s: rbus_get failed for param %s with error code %d\n", __FUNCTION__, pParamName, iRet));
         rbusValue_Release(rbusValue);
-        return;
+        return -1;
     }
     if (RBUS_STRING == rbusValue_GetType(rbusValue))
     {
@@ -159,9 +162,10 @@ void getParamValue(const char * pParamName, char * pParamValue, size_t valueSize
     }
     else
     {
-        CcspTraceError(("%s: rbus_get returned non-string type for param %s\n", __FUNCTION__, pParamName));
+        CcspTraceError(("%s: rbus_get returned non-string and non boolean type for param %s\n", __FUNCTION__, pParamName));
     }
     rbusValue_Release(rbusValue);
+    return (iRet == RBUS_ERROR_SUCCESS) ? 0 : -1;
 }
 /**
  * @brief Retrieve interface index information for the MTA interface.
@@ -230,6 +234,44 @@ void initRbusHandle(void)
 }
 
 /**
+ *@brief get parameter vis RBUS with retry mechanism.
+ * This function attempts to get a parameter using RBUS and implements a retry mechanism in case of failure.
+ */
+
+void getParamRetry(const char * pParamName, char * pParamValue, size_t valueLen)
+{
+    if (pParamName == NULL || pParamValue == NULL || valueLen == 0 )
+    {
+        CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
+        return;
+    }
+
+    int iRetryAttempt = 0;
+    int iSleepTime = 1; // Initial sleep time in seconds
+    while (iRetryAttempt < MAX_RETRY_ATTEMPTS)
+    {
+        if (getParamValue(pParamName, pParamValue, valueLen) == 0)
+        {
+            CcspTraceInfo(("%s: Successfully got param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+            break;
+        }
+        else
+        {
+            iRetryAttempt++;
+            if (iRetryAttempt > MAX_RETRY_ATTEMPTS)
+            {
+                CcspTraceError(("%s: Failed to get param %s after %d attempts, giving up\n", __FUNCTION__, pParamName, iRetryAttempt));
+                t2_event_d("MTA_WAN_GET_FAIL_AfterRetries", 1);
+                break;
+            }
+            CcspTraceError(("%s: Failed to get param %s, retrying after %d seconds...\n", __FUNCTION__, pParamName, iSleepTime));
+            sleep(iSleepTime);
+            iSleepTime += RETRY_SLEEP_INCREMENT;
+        }
+    }
+}
+
+/**
  * @brief Set parameter via RBUS with retry mechanism.
  *
  * This function attempts to set a parameter using RBUS and implements a retry mechanism in case of failure.
@@ -243,10 +285,11 @@ static void setParamRetry(const char * pParamName, const char * pParamValue, par
         CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
         return;
     }
-    // incremtal retry count like 1 3 5 7
-    int iRetryCount = 1;
-    #define MAX_RETRY_COUNT 7
-    while (1)
+
+    int iRetryAttempt = 0;
+    int iSleepTime = 1; // Initial sleep time in seconds
+
+    while (iRetryAttempt < MAX_RETRY_ATTEMPTS)
     {
         if (setParamValue(pParamName, pParamValue, paramType) == 0)
         {
@@ -255,15 +298,16 @@ static void setParamRetry(const char * pParamName, const char * pParamValue, par
         }
         else
         {
-            if (iRetryCount > MAX_RETRY_COUNT)
+            iRetryAttempt++;
+            if (iRetryAttempt > MAX_RETRY_ATTEMPTS)
             {
-                CcspTraceError(("%s: Failed to set param %s with value %s after %d attempts, giving up\n", __FUNCTION__, pParamName, pParamValue, iRetryCount));
-                t2_event_d("MTA_DHCP_ENABLE_FAIL_5Retries", 1);
+                CcspTraceError(("%s: Failed to set param %s with value %s after %d attempts, giving up\n", __FUNCTION__, pParamName, pParamValue, iRetryAttempt));
+                t2_event_d("MTA_DHCP_ENABLE_FAIL_AfterRetries", 1);
                 break;
             }
-            CcspTraceError(("%s: Failed to set param %s with value %s, retrying...\n", __FUNCTION__, pParamName, pParamValue));
-            sleep(iRetryCount);
-            iRetryCount += 2; // Increment retry count for next attempt
+            CcspTraceError(("%s: Failed to set param %s with value %s, retrying after %d seconds...\n", __FUNCTION__, pParamName, pParamValue, iSleepTime));
+            sleep(iSleepTime);
+            iSleepTime += RETRY_SLEEP_INCREMENT;
         }
     }
 }
