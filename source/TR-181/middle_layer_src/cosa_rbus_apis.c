@@ -22,6 +22,7 @@
 #include "cosa_rbus_apis.h"
 #include "cosa_voice_apis.h"
 #include "syscfg/syscfg.h"
+#include "telemetry_busmessage_sender.h"
 
 
 #define  DHCPv4_VOICE_SUPPORT_PARAM "dmsb.voicesupport.Interface.IP.DHCPV4Interface"
@@ -70,12 +71,12 @@ static rbusValueType_t convertRbusDataType(paramValueType_t paramType)
  * @param[in] pParamValue  Value of the parameter to be set.
  * @param[in] paramType    Type of the parameter value.
 */
-static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
+static int setParamValue(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
 {
     if (voiceRbusHandle == NULL || pParamName == NULL || pParamValue == NULL)   
     {
         CcspTraceError(("%s: Invalid rbus handle or NULL parameter\n", __FUNCTION__));
-        return;
+        return -1;
     }
     int iRet = -1;
     rbusValue_t rbusValue;
@@ -83,7 +84,7 @@ static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue,
     if (rbusType == RBUS_NONE)
     {
         CcspTraceError(("%s: Unsupported param type %d for param %s\n", __FUNCTION__, paramType, pParamName));
-        return;
+        return -1;
     }
 
     rbusValue_Init(&rbusValue);
@@ -91,7 +92,7 @@ static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue,
     {
         CcspTraceError(("%s: rbusValue_SetFromString failed for param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
         rbusValue_Release(rbusValue);
-        return;
+        return -1;
     }
 
     iRet = rbus_set(voiceRbusHandle, pParamName, rbusValue, NULL);
@@ -104,6 +105,7 @@ static void setParamInDhcpMgr(const char * pParamName, const char * pParamValue,
         CcspTraceInfo(("%s: rbus_set successful for param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
     }
     rbusValue_Release(rbusValue);
+    return (iRet == RBUS_ERROR_SUCCESS) ? 0 : -1;
 }
 
 /**
@@ -228,6 +230,45 @@ void initRbusHandle(void)
 }
 
 /**
+ * @brief Set parameter via RBUS with retry mechanism.
+ *
+ * This function attempts to set a parameter using RBUS and implements a retry mechanism in case of failure.
+ * It retries the set operation with incremental backoff (1s, 3s, 5s, 7s) up to a maximum number of attempts. All attempts
+ * are logged for debugging purposes.
+ */
+static void setParamRetry(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
+{
+    if (NULL == pParamName || NULL == pParamValue)
+    {
+        CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
+        return;
+    }
+    // incremtal retry count like 1 3 5 7
+    int iRetryCount = 1;
+    #define MAX_RETRY_COUNT 7
+    while (1)
+    {
+        if (setParamValue(pParamName, pParamValue, paramType) == 0)
+        {
+            CcspTraceInfo(("%s: Successfully set param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+            break;
+        }
+        else
+        {
+            if (iRetryCount > MAX_RETRY_COUNT)
+            {
+                CcspTraceError(("%s: Failed to set param %s with value %s after %d attempts, giving up\n", __FUNCTION__, pParamName, pParamValue, iRetryCount));
+                t2_event_d("MTA_DHCP_ENABLE_FAIL_5Retries", 1);
+                break;
+            }
+            CcspTraceError(("%s: Failed to set param %s with value %s, retrying...\n", __FUNCTION__, pParamName, pParamValue));
+            sleep(iRetryCount);
+            iRetryCount += 2; // Increment retry count for next attempt
+        }
+    }
+}
+
+/**
  * @brief Enable or configure IPv4 DHCP for the specified MTA interface.
  *
  * This function enables DHCPv4 for the MTA (e.g., telephony) interface
@@ -247,10 +288,10 @@ void enableDhcpv4ForMta(const char * pIfaceName)
     if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
     {
         snprintf(cParamName, sizeof(cParamName), "%s.Interface", cBaseParam);
-        setParamInDhcpMgr(cParamName, pIfaceName, STRING_PARAM);
+        setParamRetry(cParamName, pIfaceName, STRING_PARAM);
 
         snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
-        setParamInDhcpMgr(cParamName, "true", BOOLEAN_PARAM);
+        setParamRetry(cParamName, "true", BOOLEAN_PARAM);
     }
     else
     {
@@ -268,7 +309,7 @@ void disableDhcpv4ForMta(void)
     if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
     {
         snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
-        setParamInDhcpMgr(cParamName, "false", BOOLEAN_PARAM);
+        setParamRetry(cParamName, "false", BOOLEAN_PARAM);
     }
     else
     {
@@ -433,10 +474,20 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
                             __FUNCTION__, __LINE__,
                             pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName,
                             pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName));
+                        //Validate ipv4 address format
+                        struct in_addr addr;
+                        if (inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, &addr) != 1)
+                        {
+                            CcspTraceError(("%s: Invalid IPv4 address format in LeaseInfo: %s\n", __FUNCTION__, pDhcpEvtData->leaseInfo.dhcpV4Msg.address));
+                            free(pDhcpEvtData);
+                            return;
+                        }
                     }
                     else
                     {
                         CcspTraceError(("%s: Invalid DHCPv4 LeaseInfo size %d\n", __FUNCTION__, iByteLen));
+                        free(pDhcpEvtData);
+                        return;
                     }
                 }
             }
