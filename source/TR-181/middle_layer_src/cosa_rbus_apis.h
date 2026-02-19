@@ -96,18 +96,9 @@ void disableDhcpv4ForMta(void);
 void subscribeDhcpClientEvents(void);
 
 /**
- * @brief Retrieve parameter value from a component via RBUS.
- *
- * This function retrieves the value of the specified parameter from
- * a component using RBUS. It initializes an rbus value, performs
- * the get operation, and stores the result in the provided buffer.
- * Errors during the process are logged appropriately.
- *
- * @param[in] pParamName   Name of the parameter to be retrieved.
- * @param[out] pParamValue Buffer to store the retrieved parameter value.
- * @param[in] valueSize    Size of the buffer.
+ *@brief get parameter vis RBUS with retry mechanism.
+ * This function attempts to get a parameter using RBUS and implements a retry mechanism in case of failure.
  */
-
-void getParamValue(const char * pParamName, char * pParamValue, size_t valueSize);
+void getParamRetry(const char * pParamName, char * pParamValue, size_t valueLen);
 #endif /* COSA_RBUS_APIS_H */
 
