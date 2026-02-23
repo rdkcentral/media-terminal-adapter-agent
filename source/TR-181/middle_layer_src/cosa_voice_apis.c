@@ -237,6 +237,7 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
     {
         //Create the macVlan
         CcspTraceInfo(("%s:%d, Creating macVlan interface %s with mac %s\n", __FUNCTION__, __LINE__, pVoiceSupportIfaceName, cMtaInterfaceMac));
+        #if 0
         char cCmd[128] = {0};
         snprintf(cCmd, sizeof(cCmd), "ip link add link %s name %s type macvlan mode bridge", cWanIfname, pVoiceSupportIfaceName);
         system(cCmd);
@@ -245,6 +246,7 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
         snprintf(cCmd, sizeof(cCmd), "ip link set dev %s up", pVoiceSupportIfaceName);
         system(cCmd);
         CcspTraceInfo(("%s:%d, Created macVlan interface %s\n", __FUNCTION__, __LINE__, pVoiceSupportIfaceName));
+        #endif
     }
     else
     {
