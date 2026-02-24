@@ -160,5 +160,12 @@ int checkIfDefMtaDhcpOptionEnabled();
 void WaitForDhcpOption();
 void * Mta_Sysevent_thread(void *  hThisObject);
 void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject);
+/*
+ *@brief This function get the wan interface name from sysevent
+ *@param pIfname - pointer to store the wan interface name
+ *@param iIfnameLen - length of the pointer
+ *@return ANSC_STATUS_SUCCESS on success else ANSC_STATUS_FAILURE
+*/
+ANSC_STATUS getWanIfaceName(char *pIfname, int iIfnameLen);
 #endif
 // #endif

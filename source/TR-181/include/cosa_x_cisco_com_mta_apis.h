@@ -84,7 +84,7 @@ typedef  struct
 _COSA_MTA_DHCP_INFO
 {
     ANSC_IPV4_ADDRESS               IPAddress;
-    char                            BootFileName[64];
+    char                            BootFileName[256];
     char                            FQDN[64];
     ANSC_IPV4_ADDRESS               SubnetMask;
     ANSC_IPV4_ADDRESS               Gateway;
@@ -108,7 +108,7 @@ typedef  struct
 _COSA_MTA_DHCPv6_INFO
 {
     CHAR                            IPV6Address[INET6_ADDRSTRLEN];
-    CHAR                            BootFileName[64];
+    CHAR                            BootFileName[256];
     CHAR                            FQDN[64];
     CHAR                            Prefix[INET6_ADDRSTRLEN];
     CHAR                            Gateway[INET6_ADDRSTRLEN];
