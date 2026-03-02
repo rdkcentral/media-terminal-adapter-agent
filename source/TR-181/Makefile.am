@@ -16,4 +16,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
+AM_CFLAGS = -Wno-error=format
 SUBDIRS = middle_layer_src integration_src.shared

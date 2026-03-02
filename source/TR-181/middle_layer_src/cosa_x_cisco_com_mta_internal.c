@@ -156,6 +156,7 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
                             return ANSC_STATUS_FAILURE;
                         }
 			printf("len = %d\n",len);
+			printf("Test coverity workflow = %d\n");
 			for(i = 0; i<len; i++)
 			{
 				if((buffer[i] >= 48) && (buffer[i] <= 57))
