@@ -333,7 +333,7 @@ void stopVoiceFeature(void)
     CcspTraceInfo(("%s:%d, Deleted MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
     CcspTraceInfo(("%s:%d, Stopped voice support feature\n", __FUNCTION__, __LINE__));
 }
-
+#if 0
 /*
  *@brief Add IP route details for the MTA interface based on DHCP event data
  *@param pDhcpEvtData - Pointer to the DHCP event data structure
@@ -388,7 +388,7 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     snprintf(cParamName, sizeof(cParamName), "ip route add default via %s dev %s table 21", pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, pDhcpEvtData->cIfaceName);
     system(cParamName);
 }
-
+#endif
 /*
  *@brief Convert a hexadecimal string to a byte array.
  * This helper function takes a hexadecimal string representation and converts it
@@ -566,7 +566,7 @@ static void processVoiceDhcpEvent(DhcpEventData_t *pDhcpEvtData)
         CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
         return;
     }
-    addIpRouteDetails(pDhcpEvtData);
+    //addIpRouteDetails(pDhcpEvtData);
     initializeVoiceSupport(pDhcpEvtData);
     
 }
