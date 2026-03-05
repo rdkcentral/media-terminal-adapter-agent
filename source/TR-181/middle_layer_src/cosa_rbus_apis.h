@@ -68,7 +68,7 @@ void getIfaceIndexInfo(void);
  * on an active RBUS connection.
  */
 void initRbusHandle(void);
-
+#if 0
 /**
  * @brief Enable or configure IPv4 DHCP for the specified MTA interface.
  *
@@ -87,7 +87,7 @@ void enableDhcpv4ForMta(const char * pIfaceName);
  *@brief Disable DHCPv4 for the MTA interface.
  */
 void disableDhcpv4ForMta(void);
-
+#endif
 /**
  * @brief Subscribe to DHCP client events for MTA interface.
  * This function sets up subscriptions to listen for DHCP client
@@ -95,10 +95,12 @@ void disableDhcpv4ForMta(void);
  */
 void subscribeDhcpClientEvents(void);
 
+#if 0
 /**
  *@brief get parameter vis RBUS with retry mechanism.
  * This function attempts to get a parameter using RBUS and implements a retry mechanism in case of failure.
  */
 void getParamRetry(const char * pParamName, char * pParamValue, size_t valueLen);
+#endif
 #endif /* COSA_RBUS_APIS_H */
 

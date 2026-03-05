@@ -25,11 +25,13 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 
+#if 0
 #define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
 #define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
 #define  WAN_MANAGER_INTERFACE_ACTIVE_STATUS_PARAM "Device.X_RDK_WanManager.InterfaceActiveStatus"
-
+#endif
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
+#if 0
 /**
  * @brief Read the EMTA MAC address from the factory NVRAM file.
  *
@@ -254,7 +256,7 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
     }
     return 0;
 }
-
+#endif
 /*
  * @brief Start the voice support feature by creating the MTA interface
  *        and enabling DHCPv4 if necessary.
@@ -267,7 +269,8 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
  */
 void startVoiceFeature(void)
 {
-
+    subscribeDhcpClientEvents();
+    #if 0
     char cVoiceSupportEnabled[8] = {0};
     char cVoiceSupportMode[32] = {0};
     char cVoiceSupportIfaceName[32] = {0};
@@ -312,7 +315,9 @@ void startVoiceFeature(void)
     } else {
         CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
     }
+    #endif
 }
+#if 0
 /**
  * @brief stop the voice support feature by deleting the MTA interface and disabling DHCPv4 if necessary.
  */
@@ -333,7 +338,7 @@ void stopVoiceFeature(void)
     CcspTraceInfo(("%s:%d, Deleted MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
     CcspTraceInfo(("%s:%d, Stopped voice support feature\n", __FUNCTION__, __LINE__));
 }
-
+#endif 
 /*
  *@brief Add IP route details for the MTA interface based on DHCP event data
  *@param pDhcpEvtData - Pointer to the DHCP event data structure

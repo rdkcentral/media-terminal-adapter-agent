@@ -626,7 +626,7 @@ void WaitForDhcpOption()
  	}
  	CcspTraceInfo(("%s Didn't receive dhcp options in %d sec, initializing mta with default values \n",__FUNCTION__,maxCount));
 }
-#if defined (VOICE_MTA_SUPPORT)
+#if 0 //defined (VOICE_MTA_SUPPORT)
 /*
  @brief This thread listens to the sysevent notifications for wan state and initializes the voice when wan is up.
 */
@@ -1482,6 +1482,8 @@ CosaMTAInitialize
 
     getIfaceIndexInfo();
 	initRbusHandle();
+    startVoiceFeature();
+    #if 0
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
 	pthread_t voiceMtaInit;
 	if (sysevent_fd < 0)
@@ -1494,6 +1496,8 @@ CosaMTAInitialize
 	{
 		CcspTraceError(("%s: Failed to create Voice Mta sysevent thread\n", __FUNCTION__));
 	}
+    #endif
+
 #elif defined(ENABLE_ETH_WAN)
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
     pthread_t MtaInit;

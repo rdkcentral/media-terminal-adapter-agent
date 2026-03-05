@@ -37,6 +37,8 @@ extern  ANSC_HANDLE  bus_handle;
 const char cSubsystem[ ]= "eRT.";
 static char cBaseParam[32] = {0};
 
+
+#if 0
 /**
 * @brief Convert parameter value type to rbus value type.
 *
@@ -167,6 +169,7 @@ static int getParamValue(const char * pParamName, char * pParamValue, size_t val
     rbusValue_Release(rbusValue);
     return (iRet == RBUS_ERROR_SUCCESS) ? 0 : -1;
 }
+#endif
 /**
  * @brief Retrieve interface index information for the MTA interface.
  *
@@ -232,7 +235,7 @@ void initRbusHandle(void)
     }
     CcspTraceInfo(("%s: rbus_open successful\n", __FUNCTION__));
 }
-
+#if 0
 /**
  *@brief get parameter vis RBUS with retry mechanism.
  * This function attempts to get a parameter using RBUS and implements a retry mechanism in case of failure.
@@ -278,6 +281,7 @@ void getParamRetry(const char * pParamName, char * pParamValue, size_t valueLen)
  * It retries the set operation with incremental backoff (1s, 3s, 5s, 7s) up to a maximum number of attempts. All attempts
  * are logged for debugging purposes.
  */
+
 static void setParamRetry(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
 {
     if (NULL == pParamName || NULL == pParamValue)
@@ -360,6 +364,7 @@ void disableDhcpv4ForMta(void)
         CcspTraceInfo(("%s: Partner ID:%s is not Comcast, skipping DHCPv4 disable\n", __FUNCTION__, cPartnerId));
     }
 }
+#endif
 /**
  * @brief DHCP client events handler for MTA interface.
  *
