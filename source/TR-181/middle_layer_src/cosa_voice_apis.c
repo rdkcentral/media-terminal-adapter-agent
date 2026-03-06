@@ -127,7 +127,7 @@ static bool IsIfaceAlreadyUp(char *pIfaceName)
     close(iSocketFd);
     return isUp;
 }
-#endif
+
 /*
  * @brief Check if the specified network interface has an IP address assigned.
  *
@@ -170,7 +170,7 @@ static bool isIfaceHasIp(char *pIfaceName)
     return hasIp;
 }
 
-#if 0
+
 /**
  * @brief Check if EPON is active.
  *
@@ -653,6 +653,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     }
 
     CcspTraceInfo(("%s:%d, Initializing Voice Support with following details:\n", __FUNCTION__, __LINE__));
+    #if 0
     if (true == isIfaceHasIp(sVoiceInterfaceInfoType.intfName))
     {
         CcspTraceInfo(("%s:%d, %s interface is having the ip :%s\n",__FUNCTION__,__LINE__,sVoiceInterfaceInfoType.intfName,sVoiceInterfaceInfoType.ipv4Addr));
@@ -665,6 +666,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
         system("sysevent get current_wan_state >> /tmp/current_wan_state.txt");
         CcspTraceInfo(("%s:%d, No Sleep added \n",__FUNCTION__,__LINE__));
     }
+    #endif
     CcspTraceInfo(("%s:%d, Interface Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.intfName));
     CcspTraceInfo(("%s:%d, IPv4 Address: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.ipv4Addr));
     CcspTraceInfo(("%s:%d, Next Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4NextServerIp));
@@ -676,9 +678,15 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Log Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4LogServerIp));
     CcspTraceInfo(("%s:%d, Server Host Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ServerHostName));
 
-    voice_hal_interface_info_notify(&sVoiceInterfaceInfoType);
-}
 
+    uint8_t ui8Ret = voice_hal_interface_info_notify(&sVoiceInterfaceInfoType);
+    CcspTraceInfo(("%s:%d, voice_hal_interface_info_notify returned %u\n", __FUNCTION__, __LINE__, ui8Ret));
+    if (1 != ui8Ret)
+    {
+        CcspTraceError(("%s:%d, voice_hal_interface_info_notify failed to update voice interface info\n", __FUNCTION__, __LINE__));
+    }
+    
+}
 
 static void processVoiceDhcpEvent(DhcpEventData_t *pDhcpEvtData)
 {
