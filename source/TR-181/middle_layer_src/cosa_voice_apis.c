@@ -663,7 +663,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
             CcspTraceInfo (("%s:%d, ping failed\n",__FUNCTION__,__LINE__));
         }
         system("sysevent get current_wan_state >> /tmp/current_wan_state.txt");
-        sleep(10);
+        CcspTraceInfo(("%s:%d, No Sleep added \n",__FUNCTION__,__LINE__));
     }
     CcspTraceInfo(("%s:%d, Interface Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.intfName));
     CcspTraceInfo(("%s:%d, IPv4 Address: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.ipv4Addr));
