@@ -653,6 +653,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     }
 
     CcspTraceInfo(("%s:%d, Initializing Voice Support with following details:\n", __FUNCTION__, __LINE__));
+    system("sysevent get current_wan_state >> /tmp/current_wan_state.txt");
     #if 0
     if (true == isIfaceHasIp(sVoiceInterfaceInfoType.intfName))
     {
