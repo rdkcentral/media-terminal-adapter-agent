@@ -26,13 +26,13 @@
 #include <net/if.h>
 #include "telemetry_busmessage_sender.h"
 
+pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
+
 #if 0
 #define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
 #define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
 #define  WAN_MANAGER_INTERFACE_ACTIVE_STATUS_PARAM "Device.X_RDK_WanManager.InterfaceActiveStatus"
-#endif
-pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
-#if 0
+
 /**
  * @brief Read the EMTA MAC address from the factory NVRAM file.
  *
@@ -78,6 +78,7 @@ static void readMacAddress (char * pMacAddress)
         CcspTraceError(("%s: Failed to open /tmp/factory_nvram.data\n", __FUNCTION__));
     }
 }
+
 /*
  * @brief Check if the specified network interface is already up.
  *
@@ -127,7 +128,7 @@ static bool IsIfaceAlreadyUp(char *pIfaceName)
     close(iSocketFd);
     return isUp;
 }
-
+#endif
 /*
  * @brief Check if the specified network interface has an IP address assigned.
  *
@@ -139,10 +140,10 @@ static bool IsIfaceAlreadyUp(char *pIfaceName)
  * @return
  *      Returns true if the interface has an IP address assigned, false otherwise.
 */
-static bool isIfaceHasIp(char *pIfaceName)
+static bool isIfaceHasIp(char *pIfaceName, char *pIpAddr)
 {
     bool hasIp = false;
-    if (NULL == pIfaceName)
+    if (NULL == pIfaceName || NULL == pIpAddr)
     {
         CcspTraceError(("%s: NULL parameters are passed \n", __FUNCTION__));
         return false;
@@ -163,14 +164,16 @@ static bool isIfaceHasIp(char *pIfaceName)
     // Check if interface has IP address
     if (ioctl(iSocketFd, SIOCGIFADDR, &ifr) == 0)
     {
-        CcspTraceInfo(("%s: Interface %s has IP address assigned\n", __FUNCTION__, pIfaceName));
+        //CcspTraceInfo(("%s: Interface %s has IP address assigned\n", __FUNCTION__, pIfaceName));
+        struct sockaddr_in *ipaddr = (struct sockaddr_in *)&ifr.ifr_addr;
+        inet_ntop(AF_INET, &ipaddr->sin_addr, pIpAddr, INET_ADDRSTRLEN);
         hasIp = true;
     }
     close(iSocketFd);
     return hasIp;
 }
 
-
+#if 0
 /**
  * @brief Check if EPON is active.
  *
@@ -575,6 +578,37 @@ static int getOption122_SubOptions(uint8_t *pOption122Data, uint16_t iOption122L
     return -1; // Sub-option not found
 }
 
+void * monitorIpAddressStability(void *pArg)
+{
+    (void)pArg; // Unused parameter
+    pthread_detach(pthread_self());
+
+    FILE *pFile = fopen("/tmp/mta_ip_monitor.log", "w");
+    //run for 10 seconds with 5 milliseconds interval
+    for (int i = 0; i < 3000; i++)
+    {
+        char cIpAddr[32] = {0};
+        if (false == isIfaceHasIp("mta0", cIpAddr))
+        {
+            CcspTraceWarning(("%s:%d, mta0 interface lost IP address\n", __FUNCTION__, __LINE__));
+        }
+        else
+        {
+            if (pFile)
+            {
+                fprintf(pFile, "mta0 has IP address %s at iteration %d\n", cIpAddr, i);
+                fflush(pFile);
+            }
+        }
+        usleep(5000); // Sleep for 5 milliseconds
+    }
+    CcspTraceInfo(("%s:%d, Finished monitoring mta0 IP address stability\n", __FUNCTION__, __LINE__));
+    if (pFile)
+    {
+        fclose(pFile);
+    }
+    pthread_exit(NULL);
+}
 /*
  *@brief This function initializes the voice support related parameters based on DHCP event data
  *@param pDhcpEvtData - Pointer to the DHCP event data structure
@@ -679,7 +713,12 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Log Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4LogServerIp));
     CcspTraceInfo(("%s:%d, Server Host Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ServerHostName));
 
-
+    pthread_t threadId;
+    if (pthread_create(&threadId, NULL, monitorIpAddressStability, (void *)&sVoiceInterfaceInfoType) != 0)
+    {
+        CcspTraceError(("%s:%d, Failed to create thread for monitoring IP address stability\n", __FUNCTION__, __LINE__));
+    }
+    CcspTraceInfo(("%s:%d, Notifying voice interface info to voice HAL\n", __FUNCTION__, __LINE__));
     uint8_t ui8Ret = voice_hal_interface_info_notify(&sVoiceInterfaceInfoType);
     CcspTraceInfo(("%s:%d, voice_hal_interface_info_notify returned %u\n", __FUNCTION__, __LINE__, ui8Ret));
     if (1 != ui8Ret)
