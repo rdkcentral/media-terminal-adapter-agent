@@ -32,13 +32,6 @@
  */
 void startVoiceFeature(void);
 
-#if 0
-/**
- * @brief stop the voice support feature by deleting the MTA interface and disabling DHCPv4 if necessary.
- */
-void stopVoiceFeature(void);
-#endif
-
 /*
  * @brief Thread function to handle DHCP client events for voice support.
  * This function processes DHCP events in a separate thread to avoid blocking
