@@ -26,57 +26,8 @@
 #include <net/if.h>
 #include "telemetry_busmessage_sender.h"
 
-#define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
-#define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
-
-typedef enum
-{
-    IPv4,
-    IPv6,
-    NONE
-}addressFormat;
-
-static addressFormat isIPv4orIPv6(const char * pAddress)
-{
-    if (NULL == pAddress)
-        return NONE;
-
-    struct in_addr sInAddrIpv4;
-    struct in6_addr sIn6AddrIpv6;
-
-    if (1 == inet_pton(AF_INET, pAddress, &sInAddrIpv4))
-        return IPv4;
-    else if (1 == inet_pton(AF_INET6, pAddress, &sIn6AddrIpv6))
-        return IPv6;
-    else
-        return NONE;
-}
-static bool validateAddressFormat(const char *pAddress)
-{
-    if (NULL == pAddress)
-        return false;
-
-    addressFormat addrType = isIPv4orIPv6(pAddress);
-
-    char cVoiceSupportMode[32] = {0};
-
-    syscfg_get(NULL, "VoiceSupport_Mode",cVoiceSupportMode, sizeof(cVoiceSupportMode));
-
-    if (cVoiceSupportMode[0] == '\0')
-    {
-        CcspTraceWarning(("%s:%d, VoiceSupport_Mode not set in syscfg, using default Dual_Stack\n", __FUNCTION__, __LINE__));
-        snprintf(cVoiceSupportMode, sizeof(cVoiceSupportMode), VOICE_SUPPORT_MODE_DUAL_STACK);
-    }
-    if (0 == strcmp (cVoiceSupportMode, VOICE_SUPPORT_MODE_DUAL_STACK) && NONE != addrType)
-        return true;
-
-    if (0 == strcmp (cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY) && IPv4 != addrType)
-        return false;
-
-    return false;
-}
 
 /*
  * @brief Start the voice support feature by creating the MTA interface
@@ -394,12 +345,6 @@ static void processVoiceDhcpEvent(DhcpEventData_t *pDhcpEvtData)
         CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
         return;
     }
-    if( false == validateAddressFormat(pDhcpEvtData->leaseInfo.dhcpV4Msg.address))
-    {
-        CcspTraceError(("%s:%d,Invalid IP address format\n",__FUNCTION__,__LINE__));
-        return;
-    }
-
     addIpRouteDetails(pDhcpEvtData);
     initializeVoiceSupport(pDhcpEvtData);
     
