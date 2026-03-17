@@ -24,6 +24,9 @@
 #include "syscfg/syscfg.h"
 #include "telemetry_busmessage_sender.h"
 
+#define MTA_ROUTE_TABLE_NAME "mtaVoice"
+#define MTA_ROUTE_TABLE_ID   "21"
+#define RT_TABLES_FILE       "/etc/iproute2/rt_tables"
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -48,6 +51,134 @@ void startVoiceFeature(void)
     }
     subscribeDhcpClientEvents();
 }
+
+/**
+ * Ensure "21 mtaVoice" exists in /etc/iproute2/rt_tables
+ */
+static void ensureRouteTableExists(void)
+{
+    char cLine[256] = {0};
+    int iFound = 0;
+
+    FILE *fp = fopen(RT_TABLES_FILE, "r");
+    if (fp != NULL)
+    {
+        while (fgets(cLine, sizeof(cLine), fp) != NULL)
+        {
+            // Look for a line starting with "21" followed by whitespace and "mtaVoice"
+            char id[16] = {0}, name[64] = {0};
+            if (sscanf(cLine, "%15s %63s", id, name) == 2)
+            {
+                if (strcmp(id, MTA_ROUTE_TABLE_ID) == 0 && strcmp(name, MTA_ROUTE_TABLE_NAME) == 0)
+                {
+                    iFound = 1;
+                    break;
+                }
+            }
+        }
+        fclose(fp);
+    }
+
+    if (0 == iFound)
+    {
+        // Create directory if needed
+        mkdir("/etc/iproute2", 0755);
+
+        fp = fopen(RT_TABLES_FILE, "a");
+        if (fp == NULL)
+        {
+            CcspTraceError(("%s:%d, Failed to open %s for writing\n",
+                            __FUNCTION__, __LINE__, RT_TABLES_FILE));
+            return;
+        }
+        CcspTraceInfo(("%s:%d, Adding table entry '%s %s' to %s\n",
+                        __FUNCTION__, __LINE__, MTA_ROUTE_TABLE_ID, MTA_ROUTE_TABLE_NAME, RT_TABLES_FILE));
+        fprintf(fp, "%s %s\n", MTA_ROUTE_TABLE_ID, MTA_ROUTE_TABLE_NAME);
+        fclose(fp);
+    }
+}
+
+static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
+{
+    if (NULL == pDhcpEvtData)
+    {
+        CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
+        return;
+    }
+
+    CcspTraceInfo(("%s:%d, Adding IP route details for interface %s\n", __FUNCTION__, __LINE__, pDhcpEvtData->cIfaceName));
+    CcspTraceInfo(("%s:%d, Gateway address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway));
+    CcspTraceInfo(("%s:%d, TFTP server address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer));
+    CcspTraceInfo(("%s:%d, MTA IP address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.address));
+
+    char cCmd[256] = {0};
+    struct in_addr ipAddr = {0}, netMask = {0}, networkAddr = {0};
+    int iNetRet = 0;
+
+    iNetRet = inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, &ipAddr);
+    if (iNetRet != 1)
+    {
+        CcspTraceError(("%s:%d, inet_pton failed for IP address %s with error code %d\n", __FUNCTION__, __LINE__, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, iNetRet));
+        return;
+    }
+    iNetRet = inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, &netMask);
+    if (iNetRet != 1)
+    {
+        CcspTraceError(("%s:%d, inet_pton failed for netmask %s with error code %d\n", __FUNCTION__, __LINE__, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, iNetRet));
+        return;
+    }
+    networkAddr.s_addr = ipAddr.s_addr & netMask.s_addr;
+
+    char cNetworkAddr[32] = {0};
+    char cNetworkAddrWithCidr[64] = {0};
+    inet_ntop(AF_INET, &networkAddr, cNetworkAddr, sizeof(cNetworkAddr));
+    CcspTraceInfo(("%s:%d, Network Address:%s\n",__FUNCTION__,__LINE__,cNetworkAddr));
+    snprintf(cNetworkAddrWithCidr, sizeof(cNetworkAddrWithCidr), "%s/%d", cNetworkAddr, __builtin_popcount(ntohl(netMask.s_addr)));
+    CcspTraceInfo(("%s:%d, Network Address in CIDR notation:%s\n",__FUNCTION__,__LINE__,cNetworkAddrWithCidr));
+
+    const char *pAddr    = pDhcpEvtData->leaseInfo.dhcpV4Msg.address;
+    const char *pIface   = pDhcpEvtData->cIfaceName;
+    const char *pGateway = pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway;
+    const char *pTftpSrv = pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer;
+
+    // Ensure named table "mtaVoice" is registered
+    ensureRouteTableExists();
+
+    // 1. Network/subnet route first — makes the gateway reachable
+    snprintf(cCmd, sizeof(cCmd), "ip route replace %s dev %s src %s",
+             cNetworkAddrWithCidr, pIface, pAddr);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // 2. TFTP server route — now the gateway is reachable via step 1
+    snprintf(cCmd, sizeof(cCmd), "ip route replace %s via %s dev %s",
+             pTftpSrv, pGateway, pIface);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // 3. IP rule: delete first (ignore error if absent), then add
+    snprintf(cCmd, sizeof(cCmd), "ip rule del from %s table %s 2>/dev/null",
+             pAddr, MTA_ROUTE_TABLE_NAME);
+    system(cCmd);
+    snprintf(cCmd, sizeof(cCmd), "ip rule add from %s table %s",
+             pAddr, MTA_ROUTE_TABLE_NAME);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // 4. Network route in table mtaVoice
+    snprintf(cCmd, sizeof(cCmd), "ip route replace %s dev %s src %s table %s",
+             cNetworkAddrWithCidr, pIface, pAddr, MTA_ROUTE_TABLE_NAME);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // 5. Default route in table mtaVoice
+    snprintf(cCmd, sizeof(cCmd), "ip route replace default via %s dev %s table %s",
+             pGateway, pIface, MTA_ROUTE_TABLE_NAME);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+}
+
+#if 0
 
 static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
 {
@@ -144,6 +275,7 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     snprintf(sPrevTftpServer, sizeof(sPrevTftpServer), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer);
     snprintf(sPrevNetworkAddrCidr, sizeof(sPrevNetworkAddrCidr), "%s", cNetworkAddrWithCidr);
 }
+#endif
 /*
  *@brief Convert a hexadecimal string to a byte array.
  * This helper function takes a hexadecimal string representation and converts it
