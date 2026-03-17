@@ -22,23 +22,20 @@
 #include "cosa_rbus_apis.h"
 #include "voice_dhcp_hal.h"
 #include "syscfg/syscfg.h"
-#include <sys/ioctl.h>
-#include <net/if.h>
 #include "telemetry_busmessage_sender.h"
 
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*
- * @brief Start the voice support feature by creating the MTA interface
- *        and enabling DHCPv4 if necessary.
+ * @brief Start the voice support feature by subscribing to DHCP client events.
  *
- * This function checks syscfg settings to determine if voice support is
- * enabled and, if so, creates the MTA network interface and subscribes
- * to DHCP client events. If the voice support mode includes IPv4, it
- * enables DHCPv4 on the MTA interface if it does not already have an IP
- * address assigned.
- */
+ * This function checks the syscfg setting "VoiceSupport_Enabled" to determine
+ * if voice support is enabled. If it is set to "true", the function subscribes
+ * to DHCP client events to support voice-related networking behavior. If voice
+ * support is disabled or not configured, the function returns without making
+ * any changes.
+*/
 void startVoiceFeature(void)
 {
     char cVoiceSupportEnabled[8] = {0};
@@ -64,7 +61,7 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     static char sPrevIpAddr[32] = {0};
     static char sPrevIfaceName[64] = {0};
     static char sPrevGateway[32] = {0};
-    static char sPrevTftpServer[32] = {0};
+    static char sPrevTftpServer[64] = {0};
     static char sPrevNetworkAddrCidr[64] = {0};
 
     CcspTraceInfo(("%s:%d, Adding IP route details for interface %s\n", __FUNCTION__, __LINE__, pDhcpEvtData->cIfaceName));
@@ -141,11 +138,11 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     system(cParamName);
 
     // Store current configuration for next comparison
-    strncpy(sPrevIpAddr, pDhcpEvtData->leaseInfo.dhcpV4Msg.address, sizeof(sPrevIpAddr) - 1);
-    strncpy(sPrevIfaceName, pDhcpEvtData->cIfaceName, sizeof(sPrevIfaceName) - 1);
-    strncpy(sPrevGateway, pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, sizeof(sPrevGateway) - 1);
-    strncpy(sPrevTftpServer, pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer, sizeof(sPrevTftpServer) - 1);
-    strncpy(sPrevNetworkAddrCidr, cNetworkAddrWithCidr, sizeof(sPrevNetworkAddrCidr) - 1);
+    snprintf(sPrevIpAddr, sizeof(sPrevIpAddr), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.address);
+    snprintf(sPrevIfaceName, sizeof(sPrevIfaceName), "%s", pDhcpEvtData->cIfaceName);
+    snprintf(sPrevGateway, sizeof(sPrevGateway), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway);
+    snprintf(sPrevTftpServer, sizeof(sPrevTftpServer), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer);
+    snprintf(sPrevNetworkAddrCidr, sizeof(sPrevNetworkAddrCidr), "%s", cNetworkAddrWithCidr);
 }
 /*
  *@brief Convert a hexadecimal string to a byte array.
@@ -317,16 +314,21 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Log Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4LogServerIp));
     CcspTraceInfo(("%s:%d, Server Host Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ServerHostName));
 
-    /*TODO: NEED TO REMOVE THE SLEEP
-     * As of now broadcom snmpd process is not starting during bootup
-     * Added a sleep of 10 seconds as a workaround
-     * Once we get the broadcom patch, we need to remove the sleep of 10 seconds */
-    sleep(10);
+
 
     char cPartnerId[64] = { 0 };
     syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
     if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
     {
+        /*TODO: NEED TO REMOVE THE SLEEP
+         * As of now broadcom snmpd process is not starting during bootup
+         * Added a sleep of 10 seconds as a workaround
+         * Once we get the broadcom patch, we need to remove the sleep of 10 seconds */
+        if (0 == access("/nvram/add_sleep_bf_voice_hal_init", F_OK))
+        {
+            CcspTraceInfo(("%s:%d,Adding 10 seconds sleep before initializing voice support\n", __FUNCTION__, __LINE__));
+            sleep(10);
+        }
         uint8_t ui8Ret = voice_hal_interface_info_notify(&sVoiceInterfaceInfoType);
         CcspTraceInfo(("%s:%d, voice_hal_interface_info_notify returned %u\n", __FUNCTION__, __LINE__, ui8Ret));
         if (1 != ui8Ret)
@@ -335,6 +337,10 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
             t2_event_d("Failed to initialize the voice support", 1);
             return;
         }
+    }
+    else
+    {
+        CcspTraceInfo(("%s:%d, PartnerID is not Comcast, skipping voice_hal_interface_info_notify call\n", __FUNCTION__, __LINE__));
     }
 }
 
