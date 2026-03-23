@@ -626,62 +626,6 @@ void WaitForDhcpOption()
  	}
  	CcspTraceInfo(("%s Didn't receive dhcp options in %d sec, initializing mta with default values \n",__FUNCTION__,maxCount));
 }
-#if defined (VOICE_MTA_SUPPORT)
-/*
- @brief This thread listens to the sysevent notifications for wan state and initializes the voice when wan is up.
-*/
-void * voiceSyseventThread(void * hThisObject)
-{
-	(void)hThisObject;
-
-	int iError = -1;
-	char cCurrWanState[8] = {0};
-	char cEventName[32]={0}, cEventVal[32]={0};
-	async_id_t wanStateAsyncId;
-
-	sysevent_set_options(sysevent_fd, sysevent_token, "current_wan_state", TUPLE_FLAG_EVENT);
-	sysevent_setnotification(sysevent_fd, sysevent_token, "current_wan_state",  &wanStateAsyncId);
-	CcspTraceInfo(("%s Registered for sysevent notifications for current_wan_state \n",__FUNCTION__));
-
-	sysevent_get(sysevent_fd, sysevent_token, "current_wan_state", cCurrWanState, sizeof(cCurrWanState));
-
-	if (0 == strcasecmp(cCurrWanState, "up"))
-	{
-		CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Interface \n",__FUNCTION__,__LINE__));
-		startVoiceFeature();
-	}
-	do
-	{
-		int iEventNameLen = sizeof(cEventName);
-		int iEventValLen = sizeof(cEventVal);
-		memset(cEventName, 0, iEventNameLen);
-		memset(cEventVal, 0, iEventValLen);
-		iError = sysevent_getnotification(sysevent_fd, sysevent_token, cEventName, &iEventNameLen, cEventVal, &iEventValLen, &wanStateAsyncId);
-		if (0 == iError)
-		{
-			CcspTraceWarning(("%s Recieved notification event  %s, state %s\n",__FUNCTION__,cEventName,cEventVal));
-			if (0 == strcmp(cEventName, "current_wan_state"))
-			{
-				if (0 == strcmp(cEventVal, "up"))
-				{
-					CcspTraceWarning(("%s:%d, current_wan_state up, Initializing MTA Interface \n",__FUNCTION__,__LINE__));
-					startVoiceFeature();
-				}
-				else if (0 == strcmp(cEventVal, "down"))
-				{
-					CcspTraceWarning(("%s:%d, current_wan_state down, Deinitializing MTA Interface \n",__FUNCTION__,__LINE__));
-					stopVoiceFeature();
-				}
-				else
-				{
-					CcspTraceWarning(("%s:%d, current_wan_state changed to %s, Ignoring the state change \n",__FUNCTION__,__LINE__, cEventVal));
-				}
-			}
-		}
-	} while (TRUE);
-	return NULL;
-}
-#endif
 
 /*Coverity Fix CID 121026 Arg Type MisMatch */
 void * Mta_Sysevent_thread_Dhcp_Option( void * hThisObject)
@@ -1482,18 +1426,8 @@ CosaMTAInitialize
 
     getIfaceIndexInfo();
 	initRbusHandle();
-    sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
-	pthread_t voiceMtaInit;
-	if (sysevent_fd < 0)
-	{
-		CcspTraceError(("%s: Failed to open sysevent connection\n", __FUNCTION__));
-		return ANSC_STATUS_FAILURE;
-	}
-	CcspTraceInfo(("%s:%d, Starting sysevent thread for Voice Mta\n", __FUNCTION__, __LINE__));
-	if (0 != pthread_create(&voiceMtaInit, NULL, &voiceSyseventThread, (ANSC_HANDLE) hThisObject))
-	{
-		CcspTraceError(("%s: Failed to create Voice Mta sysevent thread\n", __FUNCTION__));
-	}
+    startVoiceFeature();
+
 #elif defined(ENABLE_ETH_WAN)
     sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "WAN State", &sysevent_token);
     pthread_t MtaInit;
