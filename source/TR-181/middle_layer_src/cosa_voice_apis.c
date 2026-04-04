@@ -30,6 +30,31 @@
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*
+ * @brief Convert IP mode string to enum value.
+*/
+IP_MODE convertIpMode(char *pString)
+{
+    IP_MODE eIpMode = -1;//unknown
+
+    if (NULL == pString)
+    {
+        return eIpMode;
+    }
+    if (0 == strcmp(pString, "IPv4_Only"))
+    {
+        eIpMode = IPV4_ONLY;
+    }
+    else if (0 == strcmp(pString, "Dual_Stack"))
+    {
+        eIpMode = DUAL_MODE;
+    }
+    else if (0 == strcmp(pString, "IPv6_Only"))
+    {
+        eIpMode = IPV6_ONLY;
+    }
+    return eIpMode;
+}
+/*
  * @brief Start the voice support feature by subscribing to DHCP client events.
  *
  * This function checks the syscfg setting "VoiceSupport_Enabled" to determine
@@ -41,12 +66,37 @@ pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 void startVoiceFeature(void)
 {
     char cVoiceSupportEnabled[8] = {0};
+    char cVoiceSupportMode[32] = {0};
+    IP_MODE eIpModeFromHal = -1; //Unknown
+
     syscfg_get(NULL, "VoiceSupport_Enabled", cVoiceSupportEnabled, sizeof(cVoiceSupportEnabled));
 
     if (cVoiceSupportEnabled[0] == '\0' || strcmp(cVoiceSupportEnabled, "true") != 0)
     {
-        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
+        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping voice feature initialization\n", __FUNCTION__, __LINE__));
         return;
+    }
+    syscfg_get(NULL, "VoiceSupport_Mode",cVoiceSupportMode, sizeof(cVoiceSupportMode));
+    if (0 == strlen(cVoiceSupportMode) || (strcmp(cVoiceSupportMode, "IPv4_Only") != 0 && strcmp(cVoiceSupportMode, "Dual_Stack") != 0))
+    {
+        CcspTraceError(("%s:%d, VoiceSupport_Mode is not set to a valid value, skipping voice feature initialization\n", __FUNCTION__, __LINE__));
+        return;
+    }
+
+    if ( 1 != voice_hal_get_ip_mode (&eIpModeFromHal))
+    {
+        CcspTraceError(("%s:%d, Failed to get IP mode from voice HAL\n", __FUNCTION__, __LINE__));
+        /* Proceeding with syscfg value since we can still set it in bcm and voice HAL */
+    }
+
+    IP_MODE eIpModeFromSyscfg = convertIpMode(cVoiceSupportMode);
+    if (eIpModeFromHal != eIpModeFromSyscfg)
+    {
+        CcspTraceInfo(("%s:%d, IP mode from voice HAL (%d) is different from syscfg value (%d), updating voice HAL with syscfg value\n", __FUNCTION__, __LINE__, eIpModeFromHal, eIpModeFromSyscfg));
+        if (1 != voice_hal_set_ip_mode (eIpModeFromSyscfg))
+        {
+            CcspTraceError(("%s:%d, Failed to set IP mode in voice HAL\n", __FUNCTION__, __LINE__));
+        }
     }
     subscribeDhcpClientEvents();
 }
@@ -107,35 +157,50 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
         return;
     }
 
-    // 1. Network/subnet route first — makes the gateway reachable
-    snprintf(cCmd, sizeof(cCmd), "ip route replace %s dev %s src %s",
-             cNetworkAddrWithCidr, pIface, pAddr);
+    // --- Clean up old state ---
+    // Flush all rules referencing table mtaVoice
+    snprintf(cCmd, sizeof(cCmd), "ip rule flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
-    // 2. TFTP server route — now the gateway is reachable via step 1
-    snprintf(cCmd, sizeof(cCmd), "ip route replace %s via %s dev %s",
+    // Flush all routes in table mtaVoice (we own the entire table)
+    snprintf(cCmd, sizeof(cCmd), "ip route flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // For main table: flush only proto static routes on mta interface
+    // (kernel-added routes like the connected subnet are proto kernel, not affected)
+    snprintf(cCmd, sizeof(cCmd), "ip route flush dev %s proto static 2>/dev/null", pIface);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // --- Add new state ---
+    // 1. Gateway host route (main table) — ensures gateway is explicitly reachable
+    snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s proto static",
+             pGateway, pIface);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // 2. TFTP server route (main table) — gateway is now reachable via steps 1+2
+    snprintf(cCmd, sizeof(cCmd), "ip route add %s via %s dev %s proto static",
              pTftpSrv, pGateway, pIface);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
-    // 3. IP rule: delete first (ignore error if absent), then add
-    snprintf(cCmd, sizeof(cCmd), "ip rule del from %s table %s 2>/dev/null",
-             pAddr, MTA_ROUTE_TABLE_NAME);
-    system(cCmd);
+    // 3. IP rule for source-based routing
     snprintf(cCmd, sizeof(cCmd), "ip rule add from %s table %s",
              pAddr, MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
     // 4. Network route in table mtaVoice
-    snprintf(cCmd, sizeof(cCmd), "ip route replace %s dev %s src %s table %s",
+    snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s src %s table %s",
              cNetworkAddrWithCidr, pIface, pAddr, MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
     // 5. Default route in table mtaVoice
-    snprintf(cCmd, sizeof(cCmd), "ip route replace default via %s dev %s table %s",
+    snprintf(cCmd, sizeof(cCmd), "ip route add default via %s dev %s table %s",
              pGateway, pIface, MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);

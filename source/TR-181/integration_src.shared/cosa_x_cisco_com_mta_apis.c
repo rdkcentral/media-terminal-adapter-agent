@@ -79,7 +79,6 @@
 #include "ctype.h"
 #if defined (VOICE_MTA_SUPPORT)
 #include "voice_dhcp_hal.h"
-#include "bcm_generic_hal.h"
 #endif
 
 
@@ -178,6 +177,7 @@ int mtaReapplytr104Conf(void)
 void setVoiceIfname(void)
 {
     char cVoiceSupportIfaceName[32] = { 0 };
+    char cValue[32] = { 0 };
     syscfg_get(NULL, "VoiceSupport_IfaceName",cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
     AnscTraceInfo(("%s:%d, VoiceSupport_IfaceName from syscfg is %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
 
@@ -187,41 +187,24 @@ void setVoiceIfname(void)
         snprintf(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "%s", "mta0");
         AnscTraceInfo(("Defaulting VoiceSupport_IfaceName to %s\n", cVoiceSupportIfaceName));
     }
-    char cFullpath[256] = "Device.Services.VoiceService.1.X_BROADCOM_COM_BoundIfName";
-    char cValue[128] = { 0 };
 
-    BcmRet rc;
-    char *nameArray[1] = { cFullpath };
-    BcmGenericParamInfo *getParamInfoArray = NULL;
-    UINT32 numParamInfo = 0;
-
-    rc = bcm_generic_getParameterValues((const char **)nameArray, 1, FALSE, 0,
-                                       &getParamInfoArray, &numParamInfo);
-    if (BCMRET_SUCCESS == rc)
+    if (1 != voice_hal_get_bound_interface_name(cValue, sizeof(cValue)))
     {
-        if (1 == numParamInfo)
-        {
-            AnscTraceInfo(("%s:%d, Value:%s\n", __FUNCTION__, __LINE__, getParamInfoArray[0].value));
-            snprintf(cValue, sizeof(cValue), "%s", getParamInfoArray[0].value);
-        }
-        bcm_generic_freeParamInfoArray(&getParamInfoArray, numParamInfo);
+        AnscTraceError(("%s: Failed to get current bound interface name from voice HAL\n", __FUNCTION__));
+         /* Proceeding with syscfg value since we can still set it in bcm and voice HAL */
     }
 
-    if (BCMRET_SUCCESS != rc || strlen(cValue) == 0 || strcmp(cVoiceSupportIfaceName, cValue) != 0)
+    if (0 == strlen(cValue) || strcmp(cVoiceSupportIfaceName, cValue) != 0)
     {
-        BcmGenericParamInfo setParamInfoArray[1] = { 0 };
-
-       /* Fill config structure */
-       setParamInfoArray[0].fullpath = cFullpath;
-       setParamInfoArray[0].type = "string";
-       setParamInfoArray[0].value = cVoiceSupportIfaceName;
-
-       AnscTraceInfo(("%s:%d, Setting %s to %s\n", __FUNCTION__, __LINE__, cFullpath, cVoiceSupportIfaceName));
-       rc = bcm_generic_setParameterValues(setParamInfoArray, 1, 0);
-       if (BCMRET_SUCCESS != rc) {
-          AnscTraceError(("setParamString: bcm_generic_setParameterValues failed for %s\n",
-                      cFullpath));
-       }
+        AnscTraceInfo(("%s: Current bound interface name (%s) in voice HAL is different from syscfg value, attempting to set it to %s\n", __FUNCTION__, cValue, cVoiceSupportIfaceName));
+        if (1 != voice_hal_set_bound_interface_name (cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName)))
+        {
+            AnscTraceError(("%s: Failed to set bound interface name in voice HAL\n", __FUNCTION__));
+        }
+    }
+    else
+    {
+        AnscTraceInfo(("%s: Current bound interface name (%s) in voice HAL matches syscfg value, no need to update\n", __FUNCTION__, cValue));
     }
 }
 
