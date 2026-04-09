@@ -170,9 +170,9 @@ int mtaReapplytr104Conf(void)
 #if defined (VOICE_MTA_SUPPORT)
 
 /*
- * @brief Set the voice interface name in brcm based on syscfg value.
-    * If the syscfg value is not set, default to "mta0".
-    * If the default interface name from bcm is different from the syscfg value, update it in bcm using setParameterValues API.
+ * @brief Set the voice interface name in voice HAL based on syscfg value.
+ * If the syscfg value is not set, default to "mta0".
+ * This function also checks the current bound interface name in voice HAL and only updates it if it's different from the desired value to avoid unnecessary updates.
 */
 void setVoiceIfname(void)
 {
@@ -191,7 +191,7 @@ void setVoiceIfname(void)
     if (1 != voice_hal_get_bound_interface_name(cValue, sizeof(cValue)))
     {
         AnscTraceError(("%s: Failed to get current bound interface name from voice HAL\n", __FUNCTION__));
-         /* Proceeding with syscfg value since we can still set it in bcm and voice HAL */
+         /* Proceeding with syscfg value since we can still set it in voice HAL */
     }
 
     if (0 == strlen(cValue) || strcmp(cVoiceSupportIfaceName, cValue) != 0)

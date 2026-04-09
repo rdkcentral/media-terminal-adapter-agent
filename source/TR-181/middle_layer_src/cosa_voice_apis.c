@@ -32,7 +32,7 @@ pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 /*
  * @brief Convert IP mode string to enum value.
 */
-IP_MODE convertIpMode(char *pString)
+static IP_MODE convertIpMode(const char *pString)
 {
     IP_MODE eIpMode = -1;//unknown
 
@@ -86,7 +86,7 @@ void startVoiceFeature(void)
     if ( 1 != voice_hal_get_ip_mode (&eIpModeFromHal))
     {
         CcspTraceError(("%s:%d, Failed to get IP mode from voice HAL\n", __FUNCTION__, __LINE__));
-        /* Proceeding with syscfg value since we can still set it in bcm and voice HAL */
+        /* Proceeding with syscfg value since we can still set it in voice HAL */
     }
 
     IP_MODE eIpModeFromSyscfg = convertIpMode(cVoiceSupportMode);
@@ -113,6 +113,11 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
         CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
         return;
     }
+
+    // Static variables to track previous main-table routes only
+    static char sPrevGateway[32] = {0};
+    static char sPrevTftpSrv[64] = {0};
+    static char sPrevIface[64] = {0};
 
     CcspTraceInfo(("%s:%d, Adding IP route details for interface %s\n", __FUNCTION__, __LINE__, pDhcpEvtData->cIfaceName));
     CcspTraceInfo(("%s:%d, Gateway address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway));
@@ -158,7 +163,8 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     }
 
     // --- Clean up old state ---
-    // Flush all rules referencing table mtaVoice
+
+    // Flush all rules referencing table mtaVoice (handles old IP changes)
     snprintf(cCmd, sizeof(cCmd), "ip rule flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
@@ -168,11 +174,21 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
-    // For main table: flush only proto static routes on mta interface
-    // (kernel-added routes like the connected subnet are proto kernel, not affected)
-    snprintf(cCmd, sizeof(cCmd), "ip route flush dev %s proto static 2>/dev/null", pIface);
-    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
-    system(cCmd);
+    // Delete old main-table routes using saved previous values
+    if (sPrevGateway[0] != '\0')
+    {
+        // Delete old TFTP route (must delete before gateway route)
+        snprintf(cCmd, sizeof(cCmd), "ip route del %s via %s dev %s 2>/dev/null",
+                 sPrevTftpSrv, sPrevGateway, sPrevIface);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+
+        // Delete old gateway host route
+        snprintf(cCmd, sizeof(cCmd), "ip route del %s dev %s 2>/dev/null",
+                 sPrevGateway, sPrevIface);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+    }
 
     // --- Add new state ---
     // 1. Gateway host route (main table) — ensures gateway is explicitly reachable
@@ -181,7 +197,7 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
-    // 2. TFTP server route (main table) — gateway is now reachable via steps 1+2
+    // 2. TFTP server route (main table) — gateway is now reachable via step 1
     snprintf(cCmd, sizeof(cCmd), "ip route add %s via %s dev %s proto static",
              pTftpSrv, pGateway, pIface);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
@@ -204,6 +220,11 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
              pGateway, pIface, MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
+
+    // --- Save current values for next cleanup ---
+    snprintf(sPrevGateway, sizeof(sPrevGateway), "%s", pGateway);
+    snprintf(sPrevTftpSrv, sizeof(sPrevTftpSrv), "%s", pTftpSrv);
+    snprintf(sPrevIface, sizeof(sPrevIface), "%s", pIface);
 }
 
 /*
