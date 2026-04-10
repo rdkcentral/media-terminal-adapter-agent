@@ -24,7 +24,7 @@
 #include "syscfg/syscfg.h"
 #include "telemetry_busmessage_sender.h"
 
-#define MTA_ROUTE_TABLE_NAME "mtaVoice"
+#define MTA_ROUTE_TABLE_NAME "VOICE"
 #define RT_TABLES_FILE       "/etc/iproute2/rt_tables"
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -149,7 +149,7 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     const char *pGateway = pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway;
     const char *pTftpSrv = pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer;
 
-    // Verify named table "mtaVoice" is registered (pre-populated at build time)
+    // Verify named table "VOICE" is registered (pre-populated at build time)
     if (access(RT_TABLES_FILE, R_OK) != 0)
     {
         CcspTraceError(("%s:%d, %s not accessible: %s\n",
@@ -158,13 +158,12 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     }
 
     // --- Clean up old state ---
-
-    // Flush all rules referencing table mtaVoice (handles old IP changes)
+    // Flush all rules referencing table VOICE (handles old IP changes)
     snprintf(cCmd, sizeof(cCmd), "ip rule flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
-    // Flush all routes in table mtaVoice (we own the entire table)
+    // Flush all routes in table VOICE (we own the entire table)
     snprintf(cCmd, sizeof(cCmd), "ip route flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
@@ -175,36 +174,44 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
     system(cCmd);
 
-    // --- Add new state ---
-    // 1. Gateway host route (main table) — ensures gateway is explicitly reachable
-    snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s proto static",
-             pGateway, pIface);
-    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
-    system(cCmd);
+    if ((pDhcpEvtData->dhcpMsgType != DHCP_LEASE_DEL) &&
+        (pDhcpEvtData->dhcpMsgType != DHCP_CLIENT_STOPPED) &&
+        (pDhcpEvtData->dhcpMsgType != DHCP_CLIENT_FAILED))
+    {
+        // --- Add new state ---
+        // 1. Gateway host route (main table) — ensures gateway is explicitly reachable
+        snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s proto static",
+                pGateway, pIface);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
 
-    // 2. TFTP server route (main table) — gateway is now reachable via steps 1+2
-    snprintf(cCmd, sizeof(cCmd), "ip route add %s via %s dev %s proto static",
-             pTftpSrv, pGateway, pIface);
-    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
-    system(cCmd);
+        // 2. TFTP server route (main table) — gateway is now reachable via steps 1+2
+        snprintf(cCmd, sizeof(cCmd), "ip route add %s via %s dev %s proto static",
+                pTftpSrv, pGateway, pIface);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
 
-    // 3. IP rule for source-based routing
-    snprintf(cCmd, sizeof(cCmd), "ip rule add from %s table %s",
-             pAddr, MTA_ROUTE_TABLE_NAME);
-    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
-    system(cCmd);
+        // 3. IP rule for source-based routing
+        snprintf(cCmd, sizeof(cCmd), "ip rule add from %s table %s",
+                pAddr, MTA_ROUTE_TABLE_NAME);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+        // 4. Network route in table VOICE
+        snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s src %s table %s",
+                cNetworkAddrWithCidr, pIface, pAddr, MTA_ROUTE_TABLE_NAME);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
 
-    // 4. Network route in table mtaVoice
-    snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s src %s table %s",
-             cNetworkAddrWithCidr, pIface, pAddr, MTA_ROUTE_TABLE_NAME);
-    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
-    system(cCmd);
-
-    // 5. Default route in table mtaVoice
-    snprintf(cCmd, sizeof(cCmd), "ip route add default via %s dev %s table %s",
-             pGateway, pIface, MTA_ROUTE_TABLE_NAME);
-    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
-    system(cCmd);
+        // 5. Default route in table VOICE
+        snprintf(cCmd, sizeof(cCmd), "ip route add default via %s dev %s table %s",
+                pGateway, pIface, MTA_ROUTE_TABLE_NAME);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+    }
+    else
+    {
+        CcspTraceInfo(("%s:%d, DHCP event type indicates lease deletion or client stop/failure, skipping route addition\n", __FUNCTION__, __LINE__));
+    }
 }
 
 /*
@@ -331,8 +338,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     strncpy(sVoiceInterfaceInfoType.v4DnsServers, cTmpDnsServers, sizeof(sVoiceInterfaceInfoType.v4DnsServers)-1);
     strncpy(sVoiceInterfaceInfoType.v4HostName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName, sizeof(sVoiceInterfaceInfoType.v4HostName)-1);
     strncpy(sVoiceInterfaceInfoType.v4DomainName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName, sizeof(sVoiceInterfaceInfoType.v4DomainName)-1);
-    strncpy(sVoiceInterfaceInfoType.v4LogServerIp, "(null)", sizeof(sVoiceInterfaceInfoType.v4LogServerIp)-1);
-    strncpy(sVoiceInterfaceInfoType.v4ServerHostName, "(null)", sizeof(sVoiceInterfaceInfoType.v4ServerHostName)-1);
+
 
     //Retrieve Option122 SubOption 3 for Provisioning Server
     uint8_t *pSubOptData = NULL;
