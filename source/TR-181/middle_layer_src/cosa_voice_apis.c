@@ -24,9 +24,36 @@
 #include "syscfg/syscfg.h"
 #include "telemetry_busmessage_sender.h"
 
+#define MTA_ROUTE_TABLE_NAME "VOICE"
+#define RT_TABLES_FILE       "/etc/iproute2/rt_tables"
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 
+/*
+ * @brief Convert IP mode string to enum value.
+*/
+static IP_MODE convertIpMode(const char *pString)
+{
+    IP_MODE eIpMode = -1;//unknown
+
+    if (NULL == pString)
+    {
+        return eIpMode;
+    }
+    if (0 == strcmp(pString, "IPv4_Only"))
+    {
+        eIpMode = IPV4_ONLY;
+    }
+    else if (0 == strcmp(pString, "Dual_Stack"))
+    {
+        eIpMode = DUAL_MODE;
+    }
+    else if (0 == strcmp(pString, "IPv6_Only"))
+    {
+        eIpMode = IPV6_ONLY;
+    }
+    return eIpMode;
+}
 /*
  * @brief Start the voice support feature by subscribing to DHCP client events.
  *
@@ -39,16 +66,46 @@ pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 void startVoiceFeature(void)
 {
     char cVoiceSupportEnabled[8] = {0};
+    char cVoiceSupportMode[32] = {0};
+    IP_MODE eIpModeFromHal = -1; //Unknown
+
     syscfg_get(NULL, "VoiceSupport_Enabled", cVoiceSupportEnabled, sizeof(cVoiceSupportEnabled));
 
     if (cVoiceSupportEnabled[0] == '\0' || strcmp(cVoiceSupportEnabled, "true") != 0)
     {
-        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping MTA interface creation\n", __FUNCTION__, __LINE__));
+        CcspTraceError(("%s:%d, VoiceSupport_Enabled is false or not set, skipping voice feature initialization\n", __FUNCTION__, __LINE__));
         return;
+    }
+    syscfg_get(NULL, "VoiceSupport_Mode",cVoiceSupportMode, sizeof(cVoiceSupportMode));
+    if (0 == strlen(cVoiceSupportMode) || (strcmp(cVoiceSupportMode, "IPv4_Only") != 0 && strcmp(cVoiceSupportMode, "Dual_Stack") != 0))
+    {
+        CcspTraceError(("%s:%d, VoiceSupport_Mode is not set to a valid value, skipping voice feature initialization\n", __FUNCTION__, __LINE__));
+        return;
+    }
+
+    if ( 1 != voice_hal_get_ip_mode (&eIpModeFromHal))
+    {
+        CcspTraceError(("%s:%d, Failed to get IP mode from voice HAL\n", __FUNCTION__, __LINE__));
+        /* Proceeding with syscfg value since we can still set it in voice HAL */
+    }
+
+    IP_MODE eIpModeFromSyscfg = convertIpMode(cVoiceSupportMode);
+    if (eIpModeFromHal != eIpModeFromSyscfg)
+    {
+        CcspTraceInfo(("%s:%d, IP mode from voice HAL (%d) is different from syscfg value (%d), updating voice HAL with syscfg value\n", __FUNCTION__, __LINE__, eIpModeFromHal, eIpModeFromSyscfg));
+        if (1 != voice_hal_set_ip_mode (eIpModeFromSyscfg))
+        {
+            CcspTraceError(("%s:%d, Failed to set IP mode in voice HAL\n", __FUNCTION__, __LINE__));
+        }
     }
     subscribeDhcpClientEvents();
 }
 
+/*
+ *@brief Add IP route details for the MTA interface based on the DHCP event data.
+ * This function processes the DHCP event data to extract relevant network information such as the assigned IP address, gateway, and TFTP server.
+ * It then configures the necessary IP routes for the MTA interface.
+*/
 static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
 {
     if (NULL == pDhcpEvtData)
@@ -57,19 +114,12 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
         return;
     }
 
-    // Static variables to track previous configuration
-    static char sPrevIpAddr[32] = {0};
-    static char sPrevIfaceName[64] = {0};
-    static char sPrevGateway[32] = {0};
-    static char sPrevTftpServer[64] = {0};
-    static char sPrevNetworkAddrCidr[64] = {0};
-
     CcspTraceInfo(("%s:%d, Adding IP route details for interface %s\n", __FUNCTION__, __LINE__, pDhcpEvtData->cIfaceName));
     CcspTraceInfo(("%s:%d, Gateway address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway));
     CcspTraceInfo(("%s:%d, TFTP server address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer));
     CcspTraceInfo(("%s:%d, MTA IP address:%s\n",__FUNCTION__,__LINE__,pDhcpEvtData->leaseInfo.dhcpV4Msg.address));
 
-    char cParamName[256] = {0};
+    char cCmd[256] = {0};
     struct in_addr ipAddr = {0}, netMask = {0}, networkAddr = {0};
     int iNetRet = 0;
 
@@ -94,56 +144,76 @@ static void addIpRouteDetails(DhcpEventData_t *pDhcpEvtData)
     snprintf(cNetworkAddrWithCidr, sizeof(cNetworkAddrWithCidr), "%s/%d", cNetworkAddr, __builtin_popcount(ntohl(netMask.s_addr)));
     CcspTraceInfo(("%s:%d, Network Address in CIDR notation:%s\n",__FUNCTION__,__LINE__,cNetworkAddrWithCidr));
 
-    // Check if configuration has changed
-    int bConfigChanged = (strcmp(sPrevIpAddr, pDhcpEvtData->leaseInfo.dhcpV4Msg.address) != 0) ||
-                         (strcmp(sPrevIfaceName, pDhcpEvtData->cIfaceName) != 0) ||
-                         (strcmp(sPrevGateway, pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway) != 0) ||
-                         (strcmp(sPrevTftpServer, pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer) != 0) ||
-                         (strcmp(sPrevNetworkAddrCidr, cNetworkAddrWithCidr) != 0);
+    const char *pAddr    = pDhcpEvtData->leaseInfo.dhcpV4Msg.address;
+    const char *pIface   = pDhcpEvtData->cIfaceName;
+    const char *pGateway = pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway;
+    const char *pTftpSrv = pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer;
 
-    // If previous config exists and has changed, delete old routes first
-    if (sPrevIpAddr[0] != '\0' && bConfigChanged)
+    // Verify named table "VOICE" is registered (pre-populated at build time)
+    if (access(RT_TABLES_FILE, R_OK) != 0)
     {
-        CcspTraceInfo(("%s:%d, Configuration changed, deleting previous routes\n", __FUNCTION__, __LINE__));
-
-        snprintf(cParamName, sizeof(cParamName), "ip route del default via %s dev %s table 21 2>/dev/null", sPrevGateway, sPrevIfaceName);
-        system(cParamName);
-        snprintf(cParamName, sizeof(cParamName), "ip route del %s dev %s table 21 2>/dev/null", sPrevNetworkAddrCidr, sPrevIfaceName);
-        system(cParamName);
-        snprintf(cParamName, sizeof(cParamName), "ip rule del from %s table 21 2>/dev/null", sPrevIpAddr);
-        system(cParamName);
-        snprintf(cParamName, sizeof(cParamName), "ip route del %s via %s dev %s 2>/dev/null", sPrevTftpServer, sPrevGateway, sPrevIfaceName);
-        system(cParamName);
-        snprintf(cParamName, sizeof(cParamName), "ip route del %s dev %s 2>/dev/null", sPrevIpAddr, sPrevIfaceName);
-        system(cParamName);
-    }
-
-    // Skip adding if config hasn't changed and routes already exist
-    if (!bConfigChanged && sPrevIpAddr[0] != '\0')
-    {
-        CcspTraceInfo(("%s:%d, Configuration unchanged, skipping route addition\n", __FUNCTION__, __LINE__));
+        CcspTraceError(("%s:%d, %s not accessible: %s\n",
+                        __FUNCTION__, __LINE__, RT_TABLES_FILE, strerror(errno)));
         return;
     }
 
-    // Add new routes
-    snprintf(cParamName, sizeof(cParamName), "ip route add %s dev %s", pDhcpEvtData->leaseInfo.dhcpV4Msg.address, pDhcpEvtData->cIfaceName);
-    system(cParamName);
-    snprintf(cParamName, sizeof(cParamName), "ip route add %s via %s dev %s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer, pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, pDhcpEvtData->cIfaceName);
-    system(cParamName);
-    snprintf(cParamName, sizeof(cParamName), "ip rule add from %s table 21", pDhcpEvtData->leaseInfo.dhcpV4Msg.address);
-    system(cParamName);
-    snprintf(cParamName, sizeof(cParamName), "ip route add %s dev %s table 21", cNetworkAddrWithCidr, pDhcpEvtData->cIfaceName);
-    system(cParamName);
-    snprintf(cParamName, sizeof(cParamName), "ip route add default via %s dev %s table 21", pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, pDhcpEvtData->cIfaceName);
-    system(cParamName);
+    // --- Clean up old state ---
+    // Flush all rules referencing table VOICE (handles old IP changes)
+    snprintf(cCmd, sizeof(cCmd), "ip rule flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
 
-    // Store current configuration for next comparison
-    snprintf(sPrevIpAddr, sizeof(sPrevIpAddr), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.address);
-    snprintf(sPrevIfaceName, sizeof(sPrevIfaceName), "%s", pDhcpEvtData->cIfaceName);
-    snprintf(sPrevGateway, sizeof(sPrevGateway), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway);
-    snprintf(sPrevTftpServer, sizeof(sPrevTftpServer), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cTftpServer);
-    snprintf(sPrevNetworkAddrCidr, sizeof(sPrevNetworkAddrCidr), "%s", cNetworkAddrWithCidr);
+    // Flush all routes in table VOICE (we own the entire table)
+    snprintf(cCmd, sizeof(cCmd), "ip route flush table %s 2>/dev/null", MTA_ROUTE_TABLE_NAME);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    // For main table: flush only proto static routes on mta interface
+    // (kernel-added routes like the connected subnet are proto kernel, not affected)
+    snprintf(cCmd, sizeof(cCmd), "ip route flush dev %s proto static 2>/dev/null", pIface);
+    CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+    system(cCmd);
+
+    if ((pDhcpEvtData->dhcpMsgType != DHCP_LEASE_DEL) &&
+        (pDhcpEvtData->dhcpMsgType != DHCP_CLIENT_STOPPED) &&
+        (pDhcpEvtData->dhcpMsgType != DHCP_CLIENT_FAILED))
+    {
+        // --- Add new state ---
+        // 1. Gateway host route (main table) — ensures gateway is explicitly reachable
+        snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s proto static",
+                pGateway, pIface);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+
+        // 2. TFTP server route (main table) — gateway is now reachable via steps 1+2
+        snprintf(cCmd, sizeof(cCmd), "ip route add %s via %s dev %s proto static",
+                pTftpSrv, pGateway, pIface);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+
+        // 3. IP rule for source-based routing
+        snprintf(cCmd, sizeof(cCmd), "ip rule add from %s table %s",
+                pAddr, MTA_ROUTE_TABLE_NAME);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+        // 4. Network route in table VOICE
+        snprintf(cCmd, sizeof(cCmd), "ip route add %s dev %s src %s table %s",
+                cNetworkAddrWithCidr, pIface, pAddr, MTA_ROUTE_TABLE_NAME);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+
+        // 5. Default route in table VOICE
+        snprintf(cCmd, sizeof(cCmd), "ip route add default via %s dev %s table %s",
+                pGateway, pIface, MTA_ROUTE_TABLE_NAME);
+        CcspTraceInfo(("%s:%d, Executing: %s\n", __FUNCTION__, __LINE__, cCmd));
+        system(cCmd);
+    }
+    else
+    {
+        CcspTraceInfo(("%s:%d, DHCP event type indicates lease deletion or client stop/failure, skipping route addition\n", __FUNCTION__, __LINE__));
+    }
 }
+
 /*
  *@brief Convert a hexadecimal string to a byte array.
  * This helper function takes a hexadecimal string representation and converts it
@@ -247,7 +317,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
 
     if ('\0' != sVoiceInterfaceInfoType.ipv4Addr[0])
     {
-        CcspTraceInfo(("%s:%d, IPv4 address:%s assigned for %s interface",__FUNCTION__,__LINE__,sVoiceInterfaceInfoType.ipv4Addr, sVoiceInterfaceInfoType.intfName));
+        CcspTraceInfo(("%s:%d, IPv4 address:%s assigned for %s interface\n",__FUNCTION__,__LINE__,sVoiceInterfaceInfoType.ipv4Addr, sVoiceInterfaceInfoType.intfName));
         t2_event_d("IPv4 address assigned for MTA interface", 1);
     }
     char cTmpDnsServers[VOICE_IPV4_ADDR_LEN*4] = {0};
@@ -268,8 +338,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     strncpy(sVoiceInterfaceInfoType.v4DnsServers, cTmpDnsServers, sizeof(sVoiceInterfaceInfoType.v4DnsServers)-1);
     strncpy(sVoiceInterfaceInfoType.v4HostName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName, sizeof(sVoiceInterfaceInfoType.v4HostName)-1);
     strncpy(sVoiceInterfaceInfoType.v4DomainName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName, sizeof(sVoiceInterfaceInfoType.v4DomainName)-1);
-    strncpy(sVoiceInterfaceInfoType.v4LogServerIp, "(null)", sizeof(sVoiceInterfaceInfoType.v4LogServerIp)-1);
-    strncpy(sVoiceInterfaceInfoType.v4ServerHostName, "(null)", sizeof(sVoiceInterfaceInfoType.v4ServerHostName)-1);
+
 
     //Retrieve Option122 SubOption 3 for Provisioning Server
     uint8_t *pSubOptData = NULL;
