@@ -178,7 +178,8 @@ static bool isIfaceHasIp(char *pIfaceName)
 static bool checkEponIsActive(void)
 {
     char cValue[128] = {0};
-    getParamRetry(WAN_MANAGER_INTERFACE_ACTIVE_STATUS_PARAM, cValue, sizeof(cValue));
+
+    getParamValue(WAN_MANAGER_INTERFACE_ACTIVE_STATUS_PARAM, cValue, sizeof(cValue));
     if ('\0' == cValue[0])
     {
         CcspTraceError(("%s: Failed to get WAN manager interface active status\n", __FUNCTION__));
