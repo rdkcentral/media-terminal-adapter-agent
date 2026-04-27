@@ -37,7 +37,136 @@ extern  ANSC_HANDLE  bus_handle;
 const char cSubsystem[ ]= "eRT.";
 static char cBaseParam[32] = {0};
 
+/**
+* @brief Convert parameter value type to rbus value type.
+*
+* @param[in] paramType  Parameter value type to be converted.
+* @return Corresponding rbus value type.
+*/
 
+static rbusValueType_t convertRbusDataType(paramValueType_t paramType)
+{
+    rbusValueType_t rbusType = RBUS_NONE;
+    switch (paramType)
+    {
+        case BOOLEAN_PARAM:
+            rbusType = RBUS_BOOLEAN;
+            break;
+        case STRING_PARAM:
+            rbusType = RBUS_STRING;
+            break;
+        default:
+            CcspTraceWarning(("%s: Unsupported param type %d\n", __FUNCTION__, paramType));
+            break;
+    }
+    return rbusType;
+}
+
+/**
+ * @brief Set parameter in DHCP manager via RBUS.
+ *
+ * This function sets the specified parameter in the DHCP manager
+ * using RBUS. It constructs an rbus value from the provided parameter
+ * value and type, and performs the set operation. Errors during the
+ * process are logged appropriately.
+ *
+ * @param[in] pParamName   Name of the parameter to be set.
+ * @param[in] pParamValue  Value of the parameter to be set.
+ * @param[in] paramType    Type of the parameter value.
+*/
+static int setParamValue(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
+{
+    if (voiceRbusHandle == NULL || pParamName == NULL || pParamValue == NULL)   
+    {
+        CcspTraceError(("%s: Invalid rbus handle or NULL parameter\n", __FUNCTION__));
+        return -1;
+    }
+    int iRet = -1;
+    rbusValue_t rbusValue;
+    rbusValueType_t rbusType = convertRbusDataType(paramType);
+    if (rbusType == RBUS_NONE)
+    {
+        CcspTraceError(("%s: Unsupported param type %d for param %s\n", __FUNCTION__, paramType, pParamName));
+        return -1;
+    }
+
+    rbusValue_Init(&rbusValue);
+    if (false == rbusValue_SetFromString(rbusValue, rbusType, pParamValue))
+    {
+        CcspTraceError(("%s: rbusValue_SetFromString failed for param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+        rbusValue_Release(rbusValue);
+        return -1;
+    }
+
+    iRet = rbus_set(voiceRbusHandle, pParamName, rbusValue, NULL);
+    if (iRet != RBUS_ERROR_SUCCESS)
+    {
+        CcspTraceError(("%s: rbus_set failed for param %s with error code %d\n", __FUNCTION__, pParamName, iRet));
+    }
+    else
+    {
+        CcspTraceInfo(("%s: rbus_set successful for param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+    }
+    rbusValue_Release(rbusValue);
+    return (iRet == RBUS_ERROR_SUCCESS) ? 0 : -1;
+}
+
+/**
+ * @brief Retrieve parameter value from a component via RBUS.
+ *
+ * This function retrieves the value of the specified parameter from
+ * a component using RBUS. It initializes an rbus value, performs
+ * the get operation, and stores the result in the provided buffer.
+ * Errors during the process are logged appropriately.
+ *
+ * @param[in] pParamName   Name of the parameter to be retrieved.
+ * @param[out] pParamValue Buffer to store the retrieved parameter value.
+ * @param[in] valueSize    Size of the buffer.
+ */
+
+static int getParamValue(const char * pParamName, char * pParamValue, size_t valueSize)
+{
+    if (pParamName == NULL || pParamValue == NULL || valueSize == 0 || voiceRbusHandle == NULL)
+    {
+        CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
+        return -1;
+    }
+    rbusValue_t rbusValue;
+    rbusValue_Init(&rbusValue);
+
+    int iRet = rbus_get(voiceRbusHandle, pParamName, &rbusValue);
+    if (iRet != RBUS_ERROR_SUCCESS)
+    {
+        CcspTraceError(("%s: rbus_get failed for param %s with error code %d\n", __FUNCTION__, pParamName, iRet));
+        rbusValue_Release(rbusValue);
+        return -1;
+    }
+    if (RBUS_STRING == rbusValue_GetType(rbusValue))
+    {
+        const char * pStrVal = rbusValue_GetString(rbusValue, NULL);
+        if (NULL != pStrVal)
+        {
+            snprintf(pParamValue, valueSize, "%s", pStrVal);
+            CcspTraceInfo(("%s: rbus_get successful for param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+        }
+        else
+        {
+            CcspTraceError(("%s: rbus_get returned NULL string for param %s\n", __FUNCTION__, pParamName));
+        }
+    }
+    else if (RBUS_BOOLEAN == rbusValue_GetType(rbusValue))
+    {
+        bool boolVal = rbusValue_GetBoolean(rbusValue);
+        snprintf(pParamValue, valueSize, "%s", boolVal ? "true" : "false");
+        CcspTraceInfo(("%s: rbus_get successful for param %s with boolean value %s\n", __FUNCTION__, pParamName, pParamValue));
+    }
+    else
+    {
+        CcspTraceError(("%s: rbus_get returned non-string and non boolean type for param %s\n", __FUNCTION__, pParamName));
+    }
+    rbusValue_Release(rbusValue);
+    return (iRet == RBUS_ERROR_SUCCESS) ? 0 : -1;
+}
 /**
  * @brief Retrieve interface index information for the MTA interface.
  *
@@ -102,6 +231,134 @@ void initRbusHandle(void)
         return;
     }
     CcspTraceInfo(("%s: rbus_open successful\n", __FUNCTION__));
+}
+
+/**
+ *@brief get parameter vis RBUS with retry mechanism.
+ * This function attempts to get a parameter using RBUS and implements a retry mechanism in case of failure.
+ */
+
+void getParamRetry(const char * pParamName, char * pParamValue, size_t valueLen)
+{
+    if (pParamName == NULL || pParamValue == NULL || valueLen == 0 )
+    {
+        CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
+        return;
+    }
+
+    int iRetryAttempt = 0;
+    int iSleepTime = 1; // Initial sleep time in seconds
+    while (iRetryAttempt < MAX_RETRY_ATTEMPTS)
+    {
+        if (getParamValue(pParamName, pParamValue, valueLen) == 0)
+        {
+            CcspTraceInfo(("%s: Successfully got param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+            break;
+        }
+        else
+        {
+            iRetryAttempt++;
+            if (iRetryAttempt > MAX_RETRY_ATTEMPTS)
+            {
+                CcspTraceError(("%s: Failed to get param %s after %d attempts, giving up\n", __FUNCTION__, pParamName, iRetryAttempt));
+                t2_event_d("MTA_WAN_GET_FAIL_AfterRetries", 1);
+                break;
+            }
+            CcspTraceError(("%s: Failed to get param %s, retrying after %d seconds...\n", __FUNCTION__, pParamName, iSleepTime));
+            sleep(iSleepTime);
+            iSleepTime += RETRY_SLEEP_INCREMENT;
+        }
+    }
+}
+
+/**
+ * @brief Set parameter via RBUS with retry mechanism.
+ *
+ * This function attempts to set a parameter using RBUS and implements a retry mechanism in case of failure.
+ * It retries the set operation with incremental backoff (1s, 3s, 5s, 7s) up to a maximum number of attempts. All attempts
+ * are logged for debugging purposes.
+ */
+static void setParamRetry(const char * pParamName, const char * pParamValue, paramValueType_t paramType)
+{
+    if (NULL == pParamName || NULL == pParamValue)
+    {
+        CcspTraceError(("%s: Invalid parameter\n", __FUNCTION__));
+        return;
+    }
+
+    int iRetryAttempt = 0;
+    int iSleepTime = 1; // Initial sleep time in seconds
+
+    while (iRetryAttempt < MAX_RETRY_ATTEMPTS)
+    {
+        if (setParamValue(pParamName, pParamValue, paramType) == 0)
+        {
+            CcspTraceInfo(("%s: Successfully set param %s with value %s\n", __FUNCTION__, pParamName, pParamValue));
+            break;
+        }
+        else
+        {
+            iRetryAttempt++;
+            if (iRetryAttempt > MAX_RETRY_ATTEMPTS)
+            {
+                CcspTraceError(("%s: Failed to set param %s with value %s after %d attempts, giving up\n", __FUNCTION__, pParamName, pParamValue, iRetryAttempt));
+                t2_event_d("MTA_DHCP_ENABLE_FAIL_AfterRetries", 1);
+                break;
+            }
+            CcspTraceError(("%s: Failed to set param %s with value %s, retrying after %d seconds...\n", __FUNCTION__, pParamName, pParamValue, iSleepTime));
+            sleep(iSleepTime);
+            iSleepTime += RETRY_SLEEP_INCREMENT;
+        }
+    }
+}
+
+/**
+ * @brief Enable or configure IPv4 DHCP for the specified MTA interface.
+ *
+ * This function enables DHCPv4 for the MTA (e.g., telephony) interface
+ * identified by the given interface name. The interface name must be a
+ * valid, null-terminated string referring to an existing network
+ * interface on the device.
+ * Also it updates the interface name parameter in DHCP manager via RBUS.
+ *
+ * @param[in] pIfaceName  Name of the MTA network interface for which
+ *                        DHCPv4 should be enabled.
+ */
+void enableDhcpv4ForMta(const char * pIfaceName)
+{
+    char cParamName[64] = {0};
+    char cPartnerId[64] = { 0 };
+    syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
+    if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
+    {
+        snprintf(cParamName, sizeof(cParamName), "%s.Interface", cBaseParam);
+        setParamRetry(cParamName, pIfaceName, STRING_PARAM);
+
+        snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
+        setParamRetry(cParamName, "true", BOOLEAN_PARAM);
+    }
+    else
+    {
+        CcspTraceInfo(("%s: Partner ID:%s is not Comcast, skipping DHCPv4 configuration\n", __FUNCTION__, cPartnerId));
+    }
+}
+/**
+ *@brief Disable DHCPv4 for the MTA interface.
+ */
+void disableDhcpv4ForMta(void)
+{
+    char cParamName[64] = {0};
+    char cPartnerId[64] = { 0 };
+    syscfg_get(NULL, "PartnerID", cPartnerId, sizeof(cPartnerId));
+    if ('\0' != cPartnerId[0] && strcmp(cPartnerId, "comcast") == 0)
+    {
+        snprintf(cParamName, sizeof(cParamName), "%s.Enable", cBaseParam);
+        setParamRetry(cParamName, "false", BOOLEAN_PARAM);
+    }
+    else
+    {
+        CcspTraceInfo(("%s: Partner ID:%s is not Comcast, skipping DHCPv4 disable\n", __FUNCTION__, cPartnerId));
+    }
 }
 /**
  * @brief DHCP client events handler for MTA interface.
