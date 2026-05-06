@@ -78,7 +78,7 @@
 #include "sysevent/sysevent.h"
 #include "ctype.h"
 #if defined (VOICE_MTA_SUPPORT)
-#include "voice_dhcp_hal.h"
+// #include "voice_dhcp_hal.h" Commented for mta0 interface
 #include "bcm_generic_hal.h"
 #endif
 
@@ -337,7 +337,7 @@ CosaDmlMTAInit
 		    AnscTraceInfo(("CosaDmlMTAInit: voice_hal_register_cb() \n"));
             setVoiceIfname();
 		    /* Register callback functions */
-		    voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo);
+		   // voice_hal_register_cb(cbSubsIfInfo, cbSetFirewallRule, cbGetCertInfo); Commenting the voice hal
         }
         else
         {

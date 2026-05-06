@@ -553,7 +553,7 @@ static void initializeVoiceSupport(DhcpEventData_t *pDhcpEvtData)
     CcspTraceInfo(("%s:%d, Log Server IP: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4LogServerIp));
     CcspTraceInfo(("%s:%d, Server Host Name: %s\n", __FUNCTION__, __LINE__, sVoiceInterfaceInfoType.v4ServerHostName));
 
-    voice_hal_interface_info_notify(&sVoiceInterfaceInfoType);
+    // voice_hal_interface_info_notify(&sVoiceInterfaceInfoType); Commenting the voice hal
 }
 
 
