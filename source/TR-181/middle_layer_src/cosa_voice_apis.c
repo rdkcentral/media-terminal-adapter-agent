@@ -27,6 +27,7 @@
 
 #define VOICE_SUPPORT_MODE_IPV4_ONLY    "IPv4_Only"
 #define VOICE_SUPPORT_MODE_DUAL_STACK   "Dual_Stack"
+#define  WAN_MANAGER_INTERFACE_ACTIVE_STATUS_PARAM "Device.X_RDK_WanManager.InterfaceActiveStatus"
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 /**
@@ -164,7 +165,37 @@ static bool isIfaceHasIp(char *pIfaceName)
     close(iSocketFd);
     return hasIp;
 }
+/**
+ * @brief Check if EPON is active.
+ *
+ * This function checks the status of the EPON interface by querying
+ * the WAN manager component via RBUS. It returns true if EPON is active,
+ * false otherwise.
+ *
+ * @return
+ *      Returns true if EPON is active, false otherwise.
+ */
+static bool checkEponIsActive(void)
+{
+    char cValue[128] = {0};
 
+    getParamValue(WAN_MANAGER_INTERFACE_ACTIVE_STATUS_PARAM, cValue, sizeof(cValue));
+    if ('\0' == cValue[0])
+    {
+        CcspTraceError(("%s: Failed to get WAN manager interface active status\n", __FUNCTION__));
+        return false;
+    }
+    if ((strstr(cValue, "EPON,1") != NULL) || (strstr(cValue, "WANOE,1") != NULL))
+    {
+       CcspTraceInfo(("%s: EPON or WANOE is active\n", __FUNCTION__));
+       return true;
+    }
+    else
+    {
+       CcspTraceInfo(("%s: EPON and WANOE are not active, skipping MTA interface creation\n", __FUNCTION__));
+       return false;
+    }
+}
 /*
  * @brief Create the MTA network interface as a macvlan linked to the WAN interface.
  * This function creates a macvlan interface with the specified name,
@@ -194,6 +225,11 @@ static int createMtaInterface(char * pVoiceSupportIfaceName)
         return -1;
     }
     CcspTraceInfo(("%s:%d, MTA MacVlan Mac is %s\n", __FUNCTION__, __LINE__, cMtaInterfaceMac));
+  
+    if (false == checkEponIsActive())
+    {
+        return -1;
+    }
     getWanIfaceName(cWanIfname, sizeof(cWanIfname));
     if (cWanIfname[0] == '\0')
         snprintf(cWanIfname, sizeof(cWanIfname), "erouter0");
@@ -276,6 +312,27 @@ void startVoiceFeature(void)
         CcspTraceInfo(("%s:%d, VoiceSupport_Mode: %s is not set to %s or %s, skipping udhcpc start\n",__FUNCTION__, __LINE__, cVoiceSupportMode, VOICE_SUPPORT_MODE_IPV4_ONLY, VOICE_SUPPORT_MODE_DUAL_STACK));
     }
 }
+/**
+ * @brief stop the voice support feature by deleting the MTA interface and disabling DHCPv4 if necessary.
+ */
+void stopVoiceFeature(void)
+{
+    char cVoiceSupportIfaceName[32] = {0};
+
+    disableDhcpv4ForMta();
+    syscfg_get(NULL, "VoiceSupport_IfaceName",cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName));
+    if (cVoiceSupportIfaceName[0] == '\0')
+    {
+        CcspTraceWarning(("%s:%d, VoiceSupport_IfaceName not set in syscfg, using default mta0\n", __FUNCTION__, __LINE__));
+        snprintf(cVoiceSupportIfaceName, sizeof(cVoiceSupportIfaceName), "mta0");
+    }
+    char cCmd[128] = {0};
+    snprintf(cCmd, sizeof(cCmd), "ip link delete %s", cVoiceSupportIfaceName);
+    system(cCmd);
+    CcspTraceInfo(("%s:%d, Deleted MTA interface %s\n", __FUNCTION__, __LINE__, cVoiceSupportIfaceName));
+    CcspTraceInfo(("%s:%d, Stopped voice support feature\n", __FUNCTION__, __LINE__));
+}
+
 /*
  *@brief Add IP route details for the MTA interface based on DHCP event data
  *@param pDhcpEvtData - Pointer to the DHCP event data structure

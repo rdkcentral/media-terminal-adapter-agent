@@ -264,10 +264,15 @@ static char voiceInterface[32] = { 0 };
 
 static uint8_t cbSubsIfInfo(char *pIntfName, uint8_t enable)
 {
+    if (NULL == pIntfName || '\0' == pIntfName[0])
+    {
+        AnscTraceError(("%s:%d - Invalid interface name\n", __FUNCTION__, __LINE__));
+        return 0;
+    }
     if (enable)
     {
         /* Save voice interface selection */
-        strncpy(voiceInterface, pIntfName, sizeof(voiceInterface));
+        snprintf(voiceInterface, sizeof(voiceInterface), "%s", pIntfName);
     }
 
     return 1;

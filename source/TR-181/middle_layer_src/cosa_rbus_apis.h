@@ -84,10 +84,30 @@ void initRbusHandle(void);
 void enableDhcpv4ForMta(const char * pIfaceName);
 
 /**
+ *@brief Disable DHCPv4 for the MTA interface.
+ */
+void disableDhcpv4ForMta(void);
+
+/**
  * @brief Subscribe to DHCP client events for MTA interface.
  * This function sets up subscriptions to listen for DHCP client
  * events related to the MTA interface.
  */
 void subscribeDhcpClientEvents(void);
+
+/**
+ * @brief Retrieve parameter value from a component via RBUS.
+ *
+ * This function retrieves the value of the specified parameter from
+ * a component using RBUS. It initializes an rbus value, performs
+ * the get operation, and stores the result in the provided buffer.
+ * Errors during the process are logged appropriately.
+ *
+ * @param[in] pParamName   Name of the parameter to be retrieved.
+ * @param[out] pParamValue Buffer to store the retrieved parameter value.
+ * @param[in] valueSize    Size of the buffer.
+ */
+
+void getParamValue(const char * pParamName, char * pParamValue, size_t valueSize);
 #endif /* COSA_RBUS_APIS_H */
 
