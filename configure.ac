@@ -41,6 +41,16 @@ AC_ARG_ENABLE([unitTestDockerSupport],
              [echo "Docker support is disabled"])
 AM_CONDITIONAL([UNIT_TEST_DOCKER_SUPPORT], [test x$UNIT_TEST_DOCKER_SUPPORT = xtrue])
 
+# Checks for Voice_support
+AC_ARG_ENABLE([voice_mta_support],
+[  --enable-voice_mta_support=val Turn on voice support, val=yes or no],
+[case "${enableval}" in
+  yes) voice_support=yes;;
+  no)  voice_support=no;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-voice_mta_support]) ;;
+esac],[voice_mta_support=no])
+AM_CONDITIONAL(VOICE_MTA_SUPPORT, test x"$voice_support" = x"yes")
+
 AC_PREFIX_DEFAULT(`pwd`)
 AC_ENABLE_SHARED
 AC_DISABLE_STATIC
