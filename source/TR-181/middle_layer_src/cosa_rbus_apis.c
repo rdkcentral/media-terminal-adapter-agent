@@ -592,7 +592,7 @@ void * eventSubscriptionThread(void * pArg)
     while (1)
     {
         rbusError_t rbusRet = rbusEvent_SubscribeEx (voiceRbusHandle, &rbusEventSubscription, 1 ,0);
-        if (rbusRet != RBUS_ERROR_SUCCESS)
+        if (rbusRet != RBUS_ERROR_SUCCESS && rbusRet != RBUS_ERROR_SUBSCRIPTION_ALREADY_EXIST)
         {
             CcspTraceError(("%s: rbus_event_subscribe failed for event %s with error code %d\n", __FUNCTION__, rbusEventSubscription.eventName, rbusRet));
             CcspTraceError(("%s: Retrying event subscription after 5 seconds...\n", __FUNCTION__));
