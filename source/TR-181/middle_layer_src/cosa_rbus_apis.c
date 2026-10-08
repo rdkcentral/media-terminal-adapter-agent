@@ -21,6 +21,7 @@
 #include "ccsp_psm_helper.h"
 #include "cosa_rbus_apis.h"
 #include "cosa_voice_apis.h"
+#include "cosa_x_cisco_com_mta_apis.h"
 #include "syscfg/syscfg.h"
 #include "telemetry_busmessage_sender.h"
 
@@ -269,6 +270,22 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
                             free(pDhcpEvtData);
                             return;
                         }
+                        pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+                        g_CosaMtaDhcpInfo.IPAddress.Value = addr.s_addr;
+                        if (inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.netmask, &addr) == 1)
+                            g_CosaMtaDhcpInfo.SubnetMask.Value = addr.s_addr;
+                        if (inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.gateway, &addr) == 1)
+                            g_CosaMtaDhcpInfo.Gateway.Value = addr.s_addr;
+                        if (inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer, &addr) == 1)
+                            g_CosaMtaDhcpInfo.PrimaryDNS.Value = addr.s_addr;
+                        if (inet_pton(AF_INET, pDhcpEvtData->leaseInfo.dhcpV4Msg.dnsServer1, &addr) == 1)
+                            g_CosaMtaDhcpInfo.SecondaryDNS.Value = addr.s_addr;
+                        snprintf(g_CosaMtaDhcpInfo.BootFileName, sizeof(g_CosaMtaDhcpInfo.BootFileName), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption67);
+                        if ('\0' != pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName[0] && '\0' != pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName[0])
+                            snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s.%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName);
+                        else
+                            snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName);
+                        pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
                     }
                     else
                     {

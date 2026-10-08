@@ -91,6 +91,9 @@
 #define NVRAM_BOOTSTRAP_CLEARED         (1 << 0)
 #define MAX_LINE_REG 256
 
+COSA_MTA_DHCP_INFO   g_CosaMtaDhcpInfo;
+pthread_mutex_t g_CosaMtaDhcpInfoMutex = PTHREAD_MUTEX_INITIALIZER;
+
 #ifdef MTA_TR104SUPPORT
 
 int CosaDmlTR104DataSet(char *pString,int bootup);
@@ -334,6 +337,48 @@ CosaDmlMTAInit
 }
 
 ANSC_STATUS
+Mta_GetDHCPInfo
+    (
+        PCOSA_MTA_DHCP_INFO         pInfo
+    )
+{
+    if (NULL == pInfo)
+    {
+        return ANSC_STATUS_FAILURE;
+    }
+
+    char cMac[64] = {0};
+    FILE *pFILE = fopen("/tmp/factory_nvram.data", "r");
+    if (pFILE != NULL)
+    {
+        char cLine[128] = {0};
+        while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
+        {
+          if (strncmp(cLine, "EMTA ",5) == 0)
+          {
+              char *pMac = cLine + 5;
+              pMac[strcspn(pMac, "\r\n")] = 0;
+              snprintf(cMac, sizeof(cMac), "%s", pMac);
+              break;
+          }
+        }
+        fclose(pFILE);
+    }
+    else
+    {
+        CcspTraceError(("%s: Failed to open /tmp/factory_nvram.data\n", __FUNCTION__));
+    }
+    pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+    if (cMac[0] != '\0')
+    {
+        snprintf(g_CosaMtaDhcpInfo.MACAddress, sizeof(g_CosaMtaDhcpInfo.MACAddress), "%s", cMac);
+    }
+    memcpy(pInfo, &g_CosaMtaDhcpInfo, sizeof(COSA_MTA_DHCP_INFO));
+    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+    return ANSC_STATUS_SUCCESS;
+}
+
+ANSC_STATUS
 CosaDmlMTAGetDHCPInfo
     (
         ANSC_HANDLE                 hContext,
@@ -342,7 +387,11 @@ CosaDmlMTAGetDHCPInfo
 {
 
     UNREFERENCED_PARAMETER(hContext);
+#if defined (VOICE_MTA_SUPPORT)
+    if ( Mta_GetDHCPInfo(pInfo) == ANSC_STATUS_SUCCESS )
+#else
     if ( mta_hal_GetDHCPInfo((PMTAMGMT_MTA_DHCP_INFO)pInfo) == RETURN_OK )
+#endif
         return ANSC_STATUS_SUCCESS;
     else
         return ANSC_STATUS_FAILURE;
