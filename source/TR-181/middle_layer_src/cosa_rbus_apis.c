@@ -282,9 +282,17 @@ static void dhcpClientEventsHandler(rbusHandle_t voiceRbusHandle, rbusEvent_t co
                             g_CosaMtaDhcpInfo.SecondaryDNS.Value = addr.s_addr;
                         snprintf(g_CosaMtaDhcpInfo.BootFileName, sizeof(g_CosaMtaDhcpInfo.BootFileName), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cOption67);
                         if ('\0' != pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName[0] && '\0' != pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName[0])
-                            snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s.%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName, pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName);
+                        {
+                            int iFqdnLen = snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s.%s",
+                                                    pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName,
+                                                    pDhcpEvtData->leaseInfo.dhcpV4Msg.cDomainName);
+                            if (iFqdnLen < 0 || (size_t)iFqdnLen >= sizeof(g_CosaMtaDhcpInfo.FQDN))
+                                CcspTraceWarning(("%s: FQDN truncated to fit %zu bytes\n", __FUNCTION__, sizeof(g_CosaMtaDhcpInfo.FQDN)));
+                        }
                         else
+                        {
                             snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s", pDhcpEvtData->leaseInfo.dhcpV4Msg.cHostName);
+                        }
                         pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
                     }
                     else
