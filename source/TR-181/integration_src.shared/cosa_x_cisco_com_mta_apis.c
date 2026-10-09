@@ -358,7 +358,7 @@ Mta_GetDHCPInfo
           {
               char *pMac = cLine + 5;
               pMac[strcspn(pMac, "\r\n")] = 0;
-              snprintf(cMac, sizeof(cMac), "%s", pMac);
+              snprintf(cMac, sizeof(cMac), "%.*s", (int)(sizeof(cMac) - 1), pMac);
               break;
           }
         }
