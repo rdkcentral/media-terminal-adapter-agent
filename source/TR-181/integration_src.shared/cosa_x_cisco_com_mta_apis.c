@@ -371,9 +371,23 @@ Mta_GetDHCPInfo
     pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
     if (cMac[0] != '\0')
     {
-        snprintf(g_CosaMtaDhcpInfo.MACAddress, sizeof(g_CosaMtaDhcpInfo.MACAddress), "%s", cMac);
+        snprintf(g_CosaMtaDhcpInfo.MACAddress, sizeof(g_CosaMtaDhcpInfo.MACAddress), "%.*s", (int)(sizeof(g_CosaMtaDhcpInfo.MACAddress) - 1), cMac);
     }
-    memcpy(pInfo, &g_CosaMtaDhcpInfo, sizeof(COSA_MTA_DHCP_INFO));
+
+    if (0 == pInfo->SubnetMask.Value)
+        pInfo->SubnetMask = g_CosaMtaDhcpInfo.SubnetMask;
+    if (0 == pInfo->Gateway.Value)
+        pInfo->Gateway = g_CosaMtaDhcpInfo.Gateway;
+    if ('\0' == pInfo->BootFileName[0])
+        snprintf(pInfo->BootFileName, sizeof(pInfo->BootFileName), "%s", g_CosaMtaDhcpInfo.BootFileName);
+    if ('\0' == pInfo->FQDN[0])
+        snprintf(pInfo->FQDN, sizeof(pInfo->FQDN), "%s", g_CosaMtaDhcpInfo.FQDN);
+    if ('\0' == pInfo->DHCPOption3[0])
+        snprintf(pInfo->DHCPOption3, sizeof(pInfo->DHCPOption3), "%s", g_CosaMtaDhcpInfo.DHCPOption3);
+    if ('\0' == pInfo->PCVersion[0])
+        snprintf(pInfo->PCVersion, sizeof(pInfo->PCVersion), "%s", g_CosaMtaDhcpInfo.PCVersion);
+    if ('\0' == pInfo->MACAddress[0])
+        snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", g_CosaMtaDhcpInfo.MACAddress);
     pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
     return ANSC_STATUS_SUCCESS;
 }
@@ -387,14 +401,21 @@ CosaDmlMTAGetDHCPInfo
 {
 
     UNREFERENCED_PARAMETER(hContext);
+    ANSC_STATUS returnStatus = ANSC_STATUS_FAILURE;
+
+    if ( mta_hal_GetDHCPInfo((PMTAMGMT_MTA_DHCP_INFO)pInfo) == RETURN_OK )
+    {
+        returnStatus = ANSC_STATUS_SUCCESS;
+    }
+
 #if defined (VOICE_MTA_SUPPORT)
     if ( Mta_GetDHCPInfo(pInfo) == ANSC_STATUS_SUCCESS )
-#else
-    if ( mta_hal_GetDHCPInfo((PMTAMGMT_MTA_DHCP_INFO)pInfo) == RETURN_OK )
+    {
+        returnStatus = ANSC_STATUS_SUCCESS;
+    }
 #endif
-        return ANSC_STATUS_SUCCESS;
-    else
-        return ANSC_STATUS_FAILURE;
+
+    return returnStatus;
 }
 
 ANSC_STATUS

@@ -23,6 +23,7 @@
 #include "voice_dhcp_hal.h"
 #include "syscfg/syscfg.h"
 #include "telemetry_busmessage_sender.h"
+#include "cosa_x_cisco_com_mta_apis.h"
 
 #define MTA_ROUTE_TABLE_NAME "VOICE"
 #define RT_TABLES_FILE       "/etc/iproute2/rt_tables"
@@ -424,6 +425,7 @@ static void processVoiceDhcpEvent(DhcpEventData_t *pDhcpEvtData)
     initializeVoiceSupport(pDhcpEvtData);
     
 }
+
 /*
  * @brief Thread function to handle DHCP client events for voice support.
  * This function processes DHCP events in a separate thread to avoid blocking
@@ -449,18 +451,23 @@ void * dhcpClientEventsHandlerThread(void * pArg)
     {
         switch (pDhcpEvtData->dhcpMsgType)
         {
+            /* Lease is active - refresh the cached DHCP info */
             case DHCP_CLIENT_STARTED:
-            case DHCP_CLIENT_STOPPED:
             case DHCP_LEASE_RENEW:
-            case DHCP_LEASE_DEL:
             case DHCP_LEASE_UPDATE:
-            case DHCP_CLIENT_FAILED:
-            {
                 pthread_mutex_lock(&voiceDataProcessingMutex);
-                processVoiceDhcpEvent((DhcpEventData_t *)pDhcpEvtData);
+                processVoiceDhcpEvent(pDhcpEvtData);
                 pthread_mutex_unlock(&voiceDataProcessingMutex);
-                break;
-            }
+                goto update_gDhcpInfo;
+
+            /* Lease is gone - clear the cached DHCP info */
+            case DHCP_CLIENT_STOPPED:
+            case DHCP_LEASE_DEL:
+            case DHCP_CLIENT_FAILED:
+                pthread_mutex_lock(&voiceDataProcessingMutex);
+                processVoiceDhcpEvent(pDhcpEvtData);
+                pthread_mutex_unlock(&voiceDataProcessingMutex);
+                goto clear_gDhcpInfo;
 
             default:
                 CcspTraceWarning(("%s: Unrecognized DHCPv4 message type %d\n", __FUNCTION__, pDhcpEvtData->dhcpMsgType));
@@ -471,6 +478,45 @@ void * dhcpClientEventsHandlerThread(void * pArg)
     {
         CcspTraceError(("%s: Unsupported DHCP version %d\n", __FUNCTION__, pDhcpEvtData->dhcpVersion));
     }
+    goto cleanup;
+
+update_gDhcpInfo:
+    {
+        DHCP_MGR_IPV4_MSG *pV4 = &pDhcpEvtData->leaseInfo.dhcpV4Msg;
+        struct in_addr addr;
+        pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+        if (inet_pton(AF_INET, pV4->address, &addr) == 1)
+            g_CosaMtaDhcpInfo.IPAddress.Value = addr.s_addr;
+        if (inet_pton(AF_INET, pV4->netmask, &addr) == 1)
+            g_CosaMtaDhcpInfo.SubnetMask.Value = addr.s_addr;
+        if (inet_pton(AF_INET, pV4->gateway, &addr) == 1)
+            g_CosaMtaDhcpInfo.Gateway.Value = addr.s_addr;
+        if (inet_pton(AF_INET, pV4->dnsServer, &addr) == 1)
+            g_CosaMtaDhcpInfo.PrimaryDNS.Value = addr.s_addr;
+        if (inet_pton(AF_INET, pV4->dnsServer1, &addr) == 1)
+            g_CosaMtaDhcpInfo.SecondaryDNS.Value = addr.s_addr;
+        snprintf(g_CosaMtaDhcpInfo.BootFileName, sizeof(g_CosaMtaDhcpInfo.BootFileName), "%s", pV4->cOption67);
+        if ('\0' != pV4->cHostName[0] && '\0' != pV4->cDomainName[0])
+        {
+            int iFqdnLen = snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s.%s", pV4->cHostName, pV4->cDomainName);
+            if (iFqdnLen < 0 || (size_t)iFqdnLen >= sizeof(g_CosaMtaDhcpInfo.FQDN))
+                CcspTraceWarning(("%s: FQDN truncated to fit %zu bytes\n", __FUNCTION__, sizeof(g_CosaMtaDhcpInfo.FQDN)));
+        }
+        else
+        {
+            snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s", pV4->cHostName);
+        }
+        pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+    }
+    goto cleanup;
+
+clear_gDhcpInfo:
+    pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+    memset(&g_CosaMtaDhcpInfo, 0, sizeof(g_CosaMtaDhcpInfo));
+    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+    goto cleanup;
+
+cleanup:
     free(pDhcpEvtData);
     pthread_exit(NULL);
 }
