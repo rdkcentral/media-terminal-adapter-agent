@@ -68,6 +68,7 @@
 #include "cosa_apis.h"
 #include "plugin_main_apis.h"
 #include <netinet/in.h>
+#include <pthread.h>
 
 #ifndef MTA_HAL_SHORT_VALUE_LEN
 #define  MTA_HAL_SHORT_VALUE_LEN   16
@@ -103,6 +104,9 @@ _COSA_MTA_DHCP_INFO
     ANSC_IPV4_ADDRESS               SecondaryDHCPServer;
 }
 COSA_MTA_DHCP_INFO, *PCOSA_MTA_DHCP_INFO;
+
+extern COSA_MTA_DHCP_INFO   g_CosaMtaDhcpInfo;
+extern pthread_mutex_t      g_CosaMtaDhcpInfoMutex;
 
 typedef  struct
 _COSA_MTA_DHCPv6_INFO

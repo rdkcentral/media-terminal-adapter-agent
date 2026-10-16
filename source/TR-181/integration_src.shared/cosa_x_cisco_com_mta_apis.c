@@ -91,6 +91,9 @@
 #define NVRAM_BOOTSTRAP_CLEARED         (1 << 0)
 #define MAX_LINE_REG 256
 
+COSA_MTA_DHCP_INFO   g_CosaMtaDhcpInfo;
+pthread_mutex_t g_CosaMtaDhcpInfoMutex = PTHREAD_MUTEX_INITIALIZER;
+
 #ifdef MTA_TR104SUPPORT
 
 int CosaDmlTR104DataSet(char *pString,int bootup);
@@ -334,6 +337,57 @@ CosaDmlMTAInit
 }
 
 ANSC_STATUS
+Mta_GetDHCPInfo
+    (
+        PCOSA_MTA_DHCP_INFO         pInfo
+    )
+{
+    if (NULL == pInfo)
+    {
+        return ANSC_STATUS_FAILURE;
+    }
+
+    char cMac[64] = {0};
+    FILE *pFILE = fopen("/tmp/factory_nvram.data", "r");
+    if (pFILE != NULL)
+    {
+        char cLine[128] = {0};
+        while (fgets(cLine, sizeof(cLine), pFILE) != NULL)
+        {
+          if (strncmp(cLine, "EMTA ",5) == 0)
+          {
+              char *pMac = cLine + 5;
+              pMac[strcspn(pMac, "\r\n")] = 0;
+              snprintf(cMac, sizeof(cMac), "%.*s", (int)(sizeof(cMac) - 1), pMac);
+              break;
+          }
+        }
+        fclose(pFILE);
+    }
+    else
+    {
+        CcspTraceError(("%s: Failed to open /tmp/factory_nvram.data\n", __FUNCTION__));
+    }
+    pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+    if (cMac[0] != '\0')
+    {
+        snprintf(g_CosaMtaDhcpInfo.MACAddress, sizeof(g_CosaMtaDhcpInfo.MACAddress), "%.*s", (int)(sizeof(g_CosaMtaDhcpInfo.MACAddress) - 1), cMac);
+    }
+
+    snprintf(pInfo->BootFileName, sizeof(pInfo->BootFileName), "%s", g_CosaMtaDhcpInfo.BootFileName);
+    snprintf(pInfo->FQDN, sizeof(pInfo->FQDN), "%s", g_CosaMtaDhcpInfo.FQDN);
+    snprintf(pInfo->DHCPOption3, sizeof(pInfo->DHCPOption3), "%s", g_CosaMtaDhcpInfo.DHCPOption3);
+    snprintf(pInfo->PCVersion, sizeof(pInfo->PCVersion), "%s", g_CosaMtaDhcpInfo.PCVersion);
+    snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", g_CosaMtaDhcpInfo.MACAddress);
+    if (0 == pInfo->SubnetMask.Value)
+        pInfo->SubnetMask = g_CosaMtaDhcpInfo.SubnetMask;
+    if (0 == pInfo->Gateway.Value)
+        pInfo->Gateway = g_CosaMtaDhcpInfo.Gateway;
+    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+    return ANSC_STATUS_SUCCESS;
+}
+
+ANSC_STATUS
 CosaDmlMTAGetDHCPInfo
     (
         ANSC_HANDLE                 hContext,
@@ -342,10 +396,21 @@ CosaDmlMTAGetDHCPInfo
 {
 
     UNREFERENCED_PARAMETER(hContext);
+    ANSC_STATUS returnStatus = ANSC_STATUS_FAILURE;
+
     if ( mta_hal_GetDHCPInfo((PMTAMGMT_MTA_DHCP_INFO)pInfo) == RETURN_OK )
-        return ANSC_STATUS_SUCCESS;
-    else
-        return ANSC_STATUS_FAILURE;
+    {
+        returnStatus = ANSC_STATUS_SUCCESS;
+    }
+
+#if defined (VOICE_MTA_SUPPORT)
+    if ( Mta_GetDHCPInfo(pInfo) == ANSC_STATUS_SUCCESS )
+    {
+        returnStatus = ANSC_STATUS_SUCCESS;
+    }
+#endif
+
+    return returnStatus;
 }
 
 ANSC_STATUS
