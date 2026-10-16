@@ -451,22 +451,18 @@ void * dhcpClientEventsHandlerThread(void * pArg)
     {
         switch (pDhcpEvtData->dhcpMsgType)
         {
-            /* Lease is active - refresh the cached DHCP info */
             case DHCP_CLIENT_STARTED:
             case DHCP_LEASE_RENEW:
             case DHCP_LEASE_UPDATE:
                 pthread_mutex_lock(&voiceDataProcessingMutex);
                 processVoiceDhcpEvent(pDhcpEvtData);
-                pthread_mutex_unlock(&voiceDataProcessingMutex);
                 goto update_gDhcpInfo;
 
-            /* Lease is gone - clear the cached DHCP info */
             case DHCP_CLIENT_STOPPED:
             case DHCP_LEASE_DEL:
             case DHCP_CLIENT_FAILED:
                 pthread_mutex_lock(&voiceDataProcessingMutex);
                 processVoiceDhcpEvent(pDhcpEvtData);
-                pthread_mutex_unlock(&voiceDataProcessingMutex);
                 goto clear_gDhcpInfo;
 
             default:
@@ -485,16 +481,11 @@ update_gDhcpInfo:
         DHCP_MGR_IPV4_MSG *pV4 = &pDhcpEvtData->leaseInfo.dhcpV4Msg;
         struct in_addr addr;
         pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
-        if (inet_pton(AF_INET, pV4->address, &addr) == 1)
-            g_CosaMtaDhcpInfo.IPAddress.Value = addr.s_addr;
-        if (inet_pton(AF_INET, pV4->netmask, &addr) == 1)
-            g_CosaMtaDhcpInfo.SubnetMask.Value = addr.s_addr;
-        if (inet_pton(AF_INET, pV4->gateway, &addr) == 1)
-            g_CosaMtaDhcpInfo.Gateway.Value = addr.s_addr;
-        if (inet_pton(AF_INET, pV4->dnsServer, &addr) == 1)
-            g_CosaMtaDhcpInfo.PrimaryDNS.Value = addr.s_addr;
-        if (inet_pton(AF_INET, pV4->dnsServer1, &addr) == 1)
-            g_CosaMtaDhcpInfo.SecondaryDNS.Value = addr.s_addr;
+        g_CosaMtaDhcpInfo.IPAddress.Value = (inet_pton(AF_INET, pV4->address, &addr) == 1) ? addr.s_addr : 0;
+        g_CosaMtaDhcpInfo.SubnetMask.Value = (inet_pton(AF_INET, pV4->netmask, &addr) == 1) ? addr.s_addr : 0;
+        g_CosaMtaDhcpInfo.Gateway.Value = (inet_pton(AF_INET, pV4->gateway, &addr) == 1) ? addr.s_addr : 0;
+        g_CosaMtaDhcpInfo.PrimaryDNS.Value = (inet_pton(AF_INET, pV4->dnsServer, &addr) == 1) ? addr.s_addr : 0;
+        g_CosaMtaDhcpInfo.SecondaryDNS.Value = (inet_pton(AF_INET, pV4->dnsServer1, &addr) == 1) ? addr.s_addr : 0;
         snprintf(g_CosaMtaDhcpInfo.BootFileName, sizeof(g_CosaMtaDhcpInfo.BootFileName), "%s", pV4->cOption67);
         if ('\0' != pV4->cHostName[0] && '\0' != pV4->cDomainName[0])
         {
@@ -508,12 +499,14 @@ update_gDhcpInfo:
         }
         pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
     }
+    pthread_mutex_unlock(&voiceDataProcessingMutex);
     goto cleanup;
 
 clear_gDhcpInfo:
     pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
     memset(&g_CosaMtaDhcpInfo, 0, sizeof(g_CosaMtaDhcpInfo));
     pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+    pthread_mutex_unlock(&voiceDataProcessingMutex);
     goto cleanup;
 
 cleanup:

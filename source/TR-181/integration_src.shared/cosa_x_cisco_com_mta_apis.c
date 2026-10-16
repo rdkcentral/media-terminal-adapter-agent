@@ -374,20 +374,15 @@ Mta_GetDHCPInfo
         snprintf(g_CosaMtaDhcpInfo.MACAddress, sizeof(g_CosaMtaDhcpInfo.MACAddress), "%.*s", (int)(sizeof(g_CosaMtaDhcpInfo.MACAddress) - 1), cMac);
     }
 
+    snprintf(pInfo->BootFileName, sizeof(pInfo->BootFileName), "%s", g_CosaMtaDhcpInfo.BootFileName);
+    snprintf(pInfo->FQDN, sizeof(pInfo->FQDN), "%s", g_CosaMtaDhcpInfo.FQDN);
+    snprintf(pInfo->DHCPOption3, sizeof(pInfo->DHCPOption3), "%s", g_CosaMtaDhcpInfo.DHCPOption3);
+    snprintf(pInfo->PCVersion, sizeof(pInfo->PCVersion), "%s", g_CosaMtaDhcpInfo.PCVersion);
+    snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", g_CosaMtaDhcpInfo.MACAddress);
     if (0 == pInfo->SubnetMask.Value)
         pInfo->SubnetMask = g_CosaMtaDhcpInfo.SubnetMask;
     if (0 == pInfo->Gateway.Value)
         pInfo->Gateway = g_CosaMtaDhcpInfo.Gateway;
-    if ('\0' == pInfo->BootFileName[0])
-        snprintf(pInfo->BootFileName, sizeof(pInfo->BootFileName), "%s", g_CosaMtaDhcpInfo.BootFileName);
-    if ('\0' == pInfo->FQDN[0])
-        snprintf(pInfo->FQDN, sizeof(pInfo->FQDN), "%s", g_CosaMtaDhcpInfo.FQDN);
-    if ('\0' == pInfo->DHCPOption3[0])
-        snprintf(pInfo->DHCPOption3, sizeof(pInfo->DHCPOption3), "%s", g_CosaMtaDhcpInfo.DHCPOption3);
-    if ('\0' == pInfo->PCVersion[0])
-        snprintf(pInfo->PCVersion, sizeof(pInfo->PCVersion), "%s", g_CosaMtaDhcpInfo.PCVersion);
-    if ('\0' == pInfo->MACAddress[0])
-        snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", g_CosaMtaDhcpInfo.MACAddress);
     pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
     return ANSC_STATUS_SUCCESS;
 }
