@@ -90,6 +90,83 @@
 static int sysevent_fd;
 static token_t sysevent_token;
 
+#if defined(ENABLE_ETH_WAN) && defined(MTA_TR104SUPPORT)
+#include "TR104.h"
+#include "secure_wrapper.h"
+int CosaDmlTR104DataSet(char *pString,int bootup);
+
+/* Called once MTA HAL provisioning succeeds; replaces the timed MTA_PROVISION poll in ssp_main.c */
+static void MtaTR104Init(void)
+{
+    static int tr104Initialized = 0;
+    char value[8] = {'\0'};
+    int retry, err = -1;
+
+    if (tr104Initialized)
+        return;
+
+    for (retry = 0; retry < 5; retry++)
+    {
+        if (syscfg_get(NULL, "TR104enable", value, sizeof(value)) == 0)
+            break;
+        CcspTraceError(("syscfg_get is failed\n"));
+    }
+    if (retry == 5 || strcmp(value, "true") != 0)
+    {
+        CcspTraceInfo(("RFC for TR104 is false \n"));
+        return;
+    }
+    CcspTraceInfo(("RFC for TR104 is true\n"));
+
+    for (retry = 0; retry < 8; retry++)
+    {
+        sleep(4);
+        err = TR104_open();
+        CcspTraceInfo(("TR104_open returned %d during %d iteration\n", err, retry));
+        if (err == 0)
+            break;
+    }
+    if (err != 0)
+    {
+        CcspTraceWarning(("TR104_open is failing for %d times so breaking the loop\n", retry));
+        return;
+    }
+    tr104Initialized = 1;
+
+    CcspTraceInfo(("TR104_open returned %d and restarting CcspTr069PaSsp\n", err));
+    v_secure_system("systemctl restart CcspTr069PaSsp &");
+    FILE* fptr = fopen("/nvram/.vsb64.txt","rb");
+    if (fptr)
+    {
+        CcspTraceDebug(("file present and about to read\n"));
+        char* buffer = 0;
+        long length;
+        fseek(fptr, 0, SEEK_END);
+        length = ftell(fptr);
+        fseek(fptr, 0, SEEK_SET);
+        buffer = (length >= 0) ? (char*)malloc(length+1) : NULL;
+        if (buffer)
+        {
+            /* Coverity Fix : CHECKED_RETURN */
+            size_t bytesRead = fread(buffer, 1, length, fptr);
+            if (bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                CcspTraceInfo(("buffer=%s\n", buffer));
+                CosaDmlTR104DataSet(buffer, 1);
+            } else {
+                CcspTraceWarning(("fread failed or returned 0 bytes\n"));
+            }
+            free(buffer);
+        }
+        fclose(fptr);
+    }
+    else
+    {
+        CcspTraceInfo(("file not present\n"));
+    }
+}
+#endif
+
 /**********************************************************************
 
     caller:     owner of the object
@@ -543,6 +620,9 @@ CosaMTAInitializeEthWanProvDhcpOption
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
             }
+#if defined(MTA_TR104SUPPORT)
+            MtaTR104Init();
+#endif
                         /*Coverity Fix  CID:120996 RESOURCE_LEAK */
                         free(pMtaProv);
 			return ANSC_STATUS_SUCCESS;
@@ -988,6 +1068,9 @@ if(pMtaProv && pMyObject->pmtaprovinfo)
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
             }
+#if defined(MTA_TR104SUPPORT)
+            MtaTR104Init();
+#endif
                         /* Coverity Fix CID:74083 RESOURCE_LEAK */
                         free(pMtaProv);
 			return ANSC_STATUS_SUCCESS;
