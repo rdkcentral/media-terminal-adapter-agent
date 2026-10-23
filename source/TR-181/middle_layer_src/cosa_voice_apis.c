@@ -527,6 +527,9 @@ void voice_GetDHCPInfo(PCOSA_MTA_DHCP_INFO pInfo)
         return;
     }
 
+    char cMac[64] = {0};
+    INT macStatus = platform_hal_GetMTAMacAddress(cMac);
+
     pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
     if (0 == pInfo->IPAddress.Value)
         pInfo->IPAddress = g_CosaMtaDhcpInfo.IPAddress;
@@ -542,14 +545,10 @@ void voice_GetDHCPInfo(PCOSA_MTA_DHCP_INFO pInfo)
     snprintf(pInfo->FQDN, sizeof(pInfo->FQDN), "%s", g_CosaMtaDhcpInfo.FQDN);
     snprintf(pInfo->DHCPOption3, sizeof(pInfo->DHCPOption3), "%s", g_CosaMtaDhcpInfo.DHCPOption3);
     snprintf(pInfo->PCVersion, sizeof(pInfo->PCVersion), "%s", g_CosaMtaDhcpInfo.PCVersion);
-    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
-
-    if ('\0' == pInfo->MACAddress[0])
+    if (0 == macStatus && '\0' != cMac[0])
     {
-        char cMac[64] = {0};
-        if (0 == platform_hal_GetMTAMacAddress(cMac))
-            snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", cMac);
-        else
-            CcspTraceError(("%s: platform_hal_GetMTAMacAddress failed\n", __FUNCTION__));
+       snprintf(g_CosaMtaDhcpInfo.MACAddress, sizeof(g_CosaMtaDhcpInfo.MACAddress), "%.*s", (int)(sizeof(g_CosaMtaDhcpInfo.MACAddress) - 1), cMac);
+       snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", g_CosaMtaDhcpInfo.MACAddress);
     }
+    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
 }
