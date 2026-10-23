@@ -343,9 +343,16 @@ CosaDmlMTAGetDHCPInfo
 
     UNREFERENCED_PARAMETER(hContext);
     if ( mta_hal_GetDHCPInfo((PMTAMGMT_MTA_DHCP_INFO)pInfo) == RETURN_OK )
+    {
+#if defined (VOICE_MTA_SUPPORT)
+        voice_GetDHCPInfo(pInfo);
+#endif
         return ANSC_STATUS_SUCCESS;
+    }
     else
+    {
         return ANSC_STATUS_FAILURE;
+    }
 }
 
 ANSC_STATUS

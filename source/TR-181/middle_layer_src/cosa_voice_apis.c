@@ -29,6 +29,11 @@
 
 pthread_mutex_t voiceDataProcessingMutex = PTHREAD_MUTEX_INITIALIZER;
 
+COSA_MTA_DHCP_INFO   g_CosaMtaDhcpInfo;
+static pthread_mutex_t g_CosaMtaDhcpInfoMutex = PTHREAD_MUTEX_INITIALIZER;
+
+extern INT platform_hal_GetMTAMacAddress(CHAR *pValue);
+
 /*
  * @brief Convert IP mode string to enum value.
 */
@@ -424,6 +429,36 @@ static void processVoiceDhcpEvent(DhcpEventData_t *pDhcpEvtData)
     initializeVoiceSupport(pDhcpEvtData);
     
 }
+
+static void updatevoice_GetDHCPInfo(DhcpEventData_t *pDhcpEvtData)
+{
+    if (NULL == pDhcpEvtData)
+    {
+        CcspTraceError(("%s: NULL DHCP event data provided\n", __FUNCTION__));
+        return;
+    }
+    DHCP_MGR_IPV4_MSG *pV4 = &pDhcpEvtData->leaseInfo.dhcpV4Msg;
+    struct in_addr addr;
+    pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+    g_CosaMtaDhcpInfo.IPAddress.Value = (inet_pton(AF_INET, pV4->address, &addr) == 1) ? addr.s_addr : 0;
+    g_CosaMtaDhcpInfo.SubnetMask.Value = (inet_pton(AF_INET, pV4->netmask, &addr) == 1) ? addr.s_addr : 0;
+    g_CosaMtaDhcpInfo.Gateway.Value = (inet_pton(AF_INET, pV4->gateway, &addr) == 1) ? addr.s_addr : 0;
+    g_CosaMtaDhcpInfo.PrimaryDNS.Value = (inet_pton(AF_INET, pV4->dnsServer, &addr) == 1) ? addr.s_addr : 0;
+    g_CosaMtaDhcpInfo.SecondaryDNS.Value = (inet_pton(AF_INET, pV4->dnsServer1, &addr) == 1) ? addr.s_addr : 0;
+    snprintf(g_CosaMtaDhcpInfo.BootFileName, sizeof(g_CosaMtaDhcpInfo.BootFileName), "%s", pV4->cOption67);
+    if ('\0' != pV4->cHostName[0] && '\0' != pV4->cDomainName[0])
+    {
+        int iFqdnLen = snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s.%s", pV4->cHostName, pV4->cDomainName);
+        if (iFqdnLen < 0 || (size_t)iFqdnLen >= sizeof(g_CosaMtaDhcpInfo.FQDN))
+            CcspTraceWarning(("%s: FQDN truncated to fit %zu bytes\n", __FUNCTION__, sizeof(g_CosaMtaDhcpInfo.FQDN)));
+    }
+    else
+    {
+        snprintf(g_CosaMtaDhcpInfo.FQDN, sizeof(g_CosaMtaDhcpInfo.FQDN), "%s", pV4->cHostName);
+    }
+    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+}
+
 /*
  * @brief Thread function to handle DHCP client events for voice support.
  * This function processes DHCP events in a separate thread to avoid blocking
@@ -450,14 +485,24 @@ void * dhcpClientEventsHandlerThread(void * pArg)
         switch (pDhcpEvtData->dhcpMsgType)
         {
             case DHCP_CLIENT_STARTED:
-            case DHCP_CLIENT_STOPPED:
             case DHCP_LEASE_RENEW:
-            case DHCP_LEASE_DEL:
             case DHCP_LEASE_UPDATE:
+            {
+                pthread_mutex_lock(&voiceDataProcessingMutex);
+                processVoiceDhcpEvent((DhcpEventData_t *)pDhcpEvtData);
+                updatevoice_GetDHCPInfo(pDhcpEvtData);
+                pthread_mutex_unlock(&voiceDataProcessingMutex);
+                break;
+            }
+            case DHCP_CLIENT_STOPPED:
+            case DHCP_LEASE_DEL:
             case DHCP_CLIENT_FAILED:
             {
                 pthread_mutex_lock(&voiceDataProcessingMutex);
                 processVoiceDhcpEvent((DhcpEventData_t *)pDhcpEvtData);
+                pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+                memset(&g_CosaMtaDhcpInfo, 0, sizeof(g_CosaMtaDhcpInfo));
+                pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
                 pthread_mutex_unlock(&voiceDataProcessingMutex);
                 break;
             }
@@ -473,4 +518,38 @@ void * dhcpClientEventsHandlerThread(void * pArg)
     }
     free(pDhcpEvtData);
     pthread_exit(NULL);
+}
+
+void voice_GetDHCPInfo(PCOSA_MTA_DHCP_INFO pInfo)
+{
+    if (NULL == pInfo)
+    {
+        return;
+    }
+
+    pthread_mutex_lock(&g_CosaMtaDhcpInfoMutex);
+    if (0 == pInfo->IPAddress.Value)
+        pInfo->IPAddress = g_CosaMtaDhcpInfo.IPAddress;
+    if (0 == pInfo->SubnetMask.Value)
+        pInfo->SubnetMask = g_CosaMtaDhcpInfo.SubnetMask;
+    if (0 == pInfo->Gateway.Value)
+        pInfo->Gateway = g_CosaMtaDhcpInfo.Gateway;
+    if (0 == pInfo->PrimaryDNS.Value)
+        pInfo->PrimaryDNS = g_CosaMtaDhcpInfo.PrimaryDNS;
+    if (0 == pInfo->SecondaryDNS.Value)
+        pInfo->SecondaryDNS = g_CosaMtaDhcpInfo.SecondaryDNS;
+    snprintf(pInfo->BootFileName, sizeof(pInfo->BootFileName), "%s", g_CosaMtaDhcpInfo.BootFileName);
+    snprintf(pInfo->FQDN, sizeof(pInfo->FQDN), "%s", g_CosaMtaDhcpInfo.FQDN);
+    snprintf(pInfo->DHCPOption3, sizeof(pInfo->DHCPOption3), "%s", g_CosaMtaDhcpInfo.DHCPOption3);
+    snprintf(pInfo->PCVersion, sizeof(pInfo->PCVersion), "%s", g_CosaMtaDhcpInfo.PCVersion);
+    pthread_mutex_unlock(&g_CosaMtaDhcpInfoMutex);
+
+    if ('\0' == pInfo->MACAddress[0])
+    {
+        char cMac[64] = {0};
+        if (0 == platform_hal_GetMTAMacAddress(cMac))
+            snprintf(pInfo->MACAddress, sizeof(pInfo->MACAddress), "%s", cMac);
+        else
+            CcspTraceError(("%s: platform_hal_GetMTAMacAddress failed\n", __FUNCTION__));
+    }
 }

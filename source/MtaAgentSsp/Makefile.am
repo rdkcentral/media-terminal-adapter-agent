@@ -26,3 +26,6 @@ CcspMtaAgentSsp_CPPFLAGS = -I$(top_srcdir)/source/TR-181/board_sbapi -I$(top_src
 CcspMtaAgentSsp_SOURCES = ssp_messagebus_interface.c TR104.c TR104_webconfig.c ssp_main.c ssp_action.c dm_pack_datamodel.c ../TR-181/integration_src.shared/cosa_x_cisco_com_mta_apis.c
 CcspMtaAgentSsp_LDFLAGS = -lccsp_common -lhal_mta -lsyscfg -lprivilege -lsecure_wrapper -lwebconfig_framework -lmsgpackc -lsysevent -lcjson
 
+if VOICE_MTA_SUPPORT
+CcspMtaAgentSsp_LDADD = ../TR-181/middle_layer_src/libCcspMtaAgent_middle_layer_src.la -lrbus -lhal_platform -ltelemetry_msgsender
+endif
