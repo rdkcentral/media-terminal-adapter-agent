@@ -79,7 +79,6 @@
 #include "ctype.h"
 #if defined (VOICE_MTA_SUPPORT)
 #include "voice_dhcp_hal.h"
-extern void voice_GetDHCPInfo(PCOSA_MTA_DHCP_INFO pInfo) __attribute__((weak));
 #endif
 
 
@@ -344,17 +343,9 @@ CosaDmlMTAGetDHCPInfo
 
     UNREFERENCED_PARAMETER(hContext);
     if ( mta_hal_GetDHCPInfo((PMTAMGMT_MTA_DHCP_INFO)pInfo) == RETURN_OK )
-    {
-#if defined (VOICE_MTA_SUPPORT)
-        if (voice_GetDHCPInfo)
-            voice_GetDHCPInfo(pInfo);
-#endif
         return ANSC_STATUS_SUCCESS;
-    }
     else
-    {
         return ANSC_STATUS_FAILURE;
-    }
 }
 
 ANSC_STATUS
