@@ -20,6 +20,8 @@
 #ifndef _COSA_VOICE_APIS_H_
 #define _COSA_VOICE_APIS_H_
 
+#include "cosa_x_cisco_com_mta_apis.h"
+
 /*
  * @brief Start the voice support feature by creating the MTA interface
  *        and enabling DHCPv4 if necessary.
@@ -44,5 +46,6 @@ void startVoiceFeature(void);
 */
 void * dhcpClientEventsHandlerThread(void * pArg);
 
+void voice_GetDHCPInfo(PCOSA_MTA_DHCP_INFO pInfo);
 
 #endif
