@@ -69,6 +69,11 @@
 
 **************************************************************************/
 
+#if defined(ENABLE_ETH_WAN) && defined(MTA_TR104SUPPORT)
+/* Must precede mta_hal.h: LatticeFrameworkTypes.h typedefs CHAR, which mta_hal.h #defines */
+#include "TR104.h"
+#include "secure_wrapper.h"
+#endif
 #include "plugin_main_apis.h"
 #include "safec_lib_common.h"
 #include "cosa_x_cisco_com_mta_apis.h"
@@ -91,8 +96,6 @@ static int sysevent_fd;
 static token_t sysevent_token;
 
 #if defined(ENABLE_ETH_WAN) && defined(MTA_TR104SUPPORT)
-#include "TR104.h"
-#include "secure_wrapper.h"
 int CosaDmlTR104DataSet(char *pString,int bootup);
 
 /* Called once MTA HAL provisioning succeeds; replaces the timed MTA_PROVISION poll in ssp_main.c */
