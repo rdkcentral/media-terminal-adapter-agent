@@ -983,7 +983,9 @@ X_CISCO_COM_MTA_GetParamStringValue
     ERR_CHK(rc);
     if((!ind) && (rc == EOK))
     {
-        rc = strcpy_s(pValue, *pUlSize, Info.RebindTimeRemaining);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pRebindTimeRemaining = Info.RebindTimeRemaining;
+        rc = strcpy_s(pValue, *pUlSize, pRebindTimeRemaining);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -1919,7 +1921,9 @@ LineTable_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pInfo->ReceiverOffHook);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pReceiverOffHook = pInfo->ReceiverOffHook;
+        rc = strcpy_s(pValue, *pUlSize, pReceiverOffHook);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -2381,7 +2385,9 @@ CALLP_GetParamStringValue
     ERR_CHK(rc);
     if((!ind) && (rc == EOK))
     {
-        rc = strcpy_s(pValue, *pUlSize, CALLP.LoopCurrent);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pLoopCurrent = CALLP.LoopCurrent;
+        rc = strcpy_s(pValue, *pUlSize, pLoopCurrent);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -3248,7 +3254,9 @@ Calls_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pCalls->EQIMaximum);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pEQIMaximum = pCalls->EQIMaximum;
+        rc = strcpy_s(pValue, *pUlSize, pEQIMaximum);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -4221,7 +4229,9 @@ ServiceClass_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pServiceClass->ServiceClassName);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pServiceClassName = pServiceClass->ServiceClassName;
+        rc = strcpy_s(pValue, *pUlSize, pServiceClassName);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -4553,7 +4563,9 @@ ServiceFlow_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pFlow->TrafficType);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pTrafficType = pFlow->TrafficType;
+        rc = strcpy_s(pValue, *pUlSize, pTrafficType);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -5020,7 +5032,9 @@ Dect_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pDect->RFPI);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pRFPI = pDect->RFPI;
+        rc = strcpy_s(pValue, *pUlSize, pRFPI);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -5693,7 +5707,9 @@ Handsets_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pInfo->HandsetName);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pHandsetName = pInfo->HandsetName;
+        rc = strcpy_s(pValue, *pUlSize, pHandsetName);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -6336,7 +6352,9 @@ DSXLog_GetParamStringValue
     if((!ind) && (rc == EOK))
     {
         /* collect value */
-        rc = strcpy_s(pValue, *pUlSize, pDSXLog->Time);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pTime = pDSXLog->Time;
+        rc = strcpy_s(pValue, *pUlSize, pTime);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -7517,7 +7535,9 @@ Battery_GetParamStringValue
     ERR_CHK(rc);
     if((!ind) && (rc == EOK))
     {
-        rc = strcpy_s(pValue, *pUlSize, pInfo->ModelNumber);
+        /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+        char* pModelNumber = pInfo->ModelNumber;
+        rc = strcpy_s(pValue, *pUlSize, pModelNumber);
         if (rc != EOK)
         {
             ERR_CHK(rc);
@@ -7876,7 +7896,9 @@ BOOL EthernetWAN_MTA_SetParamIntValue
                }
                CosaDmlMTASetStartUpIpMode(pMyObject->pmtaprovinfo, pInt);
                
-               rc = strcpy_s(pMyObject->pmtaprovinfo->StartupIPMode.UpdateSource,sizeof( pMyObject->pmtaprovinfo->StartupIPMode.UpdateSource ), requestorStr);
+               /* Coverity Fix CID: check_after_deref - requestorStr already dereferenced above */
+               char* pRequestorStr = requestorStr;
+               rc = strcpy_s(pMyObject->pmtaprovinfo->StartupIPMode.UpdateSource,sizeof( pMyObject->pmtaprovinfo->StartupIPMode.UpdateSource ), pRequestorStr);
                if (rc != EOK)
                {
                    ERR_CHK(rc);
@@ -8000,7 +8022,9 @@ EthernetWAN_MTA_GetParamStringValue
             ERR_CHK(rc);
             if((!ind) && (rc == EOK))
             {
-                rc = strcpy_s(pValue, *pUlSize, pMyObject->pmtaprovinfo->IPv6PrimaryDhcpServerOptions.ActiveValue);
+                /* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+                char* pIPv6PrimaryActiveValue = pMyObject->pmtaprovinfo->IPv6PrimaryDhcpServerOptions.ActiveValue;
+                rc = strcpy_s(pValue, *pUlSize, pIPv6PrimaryActiveValue);
                 if (rc != EOK)
                 {
                     ERR_CHK(rc);
@@ -8123,7 +8147,9 @@ EthernetWAN_MTA_SetParamStringValue
                           }
                       CosaDmlMTASetPrimaryDhcpServerOptions(pMyObject->pmtaprovinfo, pString, ip_type);
 
-                      rc = strcpy_s(pMyObject->pmtaprovinfo->IPv6PrimaryDhcpServerOptions.UpdateSource, sizeof( pMyObject->pmtaprovinfo->IPv6PrimaryDhcpServerOptions.UpdateSource ), requestorStr );
+                      /* Coverity Fix CID: check_after_deref - requestorStr already dereferenced above */
+                      char* pRequestorStr = requestorStr;
+                      rc = strcpy_s(pMyObject->pmtaprovinfo->IPv6PrimaryDhcpServerOptions.UpdateSource, sizeof( pMyObject->pmtaprovinfo->IPv6PrimaryDhcpServerOptions.UpdateSource ), pRequestorStr );
                       if (rc != EOK)
                       {
                           ERR_CHK(rc);

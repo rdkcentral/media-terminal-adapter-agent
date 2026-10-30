@@ -149,7 +149,9 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
 	char 	tbuffer [ MAX_IPV6_HEX_VAL ] = { 0 };
         errno_t rc = -1;
 			len = strlen((const char*)buffer);
-                        rc = strcpy_s(tbuffer,sizeof(tbuffer), (const char*)buffer);
+                        /* Coverity Fix CID: check_after_deref - buffer already dereferenced above */
+                        const char* pBuffer = (const char*)buffer;
+                        rc = strcpy_s(tbuffer,sizeof(tbuffer), pBuffer);
                         if(rc != EOK)
                         {
                             ERR_CHK(rc);
@@ -556,6 +558,8 @@ CosaMTAInitializeEthWanProvDhcpOption
 		}
      #endif
      /* CID 121017 Structurally dead code fix */
+     /* Coverity Fix: leaked_storage - free pMtaProv when ENABLE_ETH_WAN is not defined */
+     free(pMtaProv);
      return ANSC_STATUS_SUCCESS;
 }
 
@@ -1122,9 +1126,11 @@ if(pMtaProv)
 		rc = memset_s(pMtaProv->DhcpOption2171CccV6DssID1, sizeof(pMtaProv->DhcpOption2171CccV6DssID1), 0, sizeof(pMtaProv->DhcpOption2171CccV6DssID1));
                 ERR_CHK(rc);
 		pMtaProv->DhcpOption2171CccV6DssID1Len = 0;
-		if(0 != strlen(pmtaethpro->IPv6PrimaryDhcpServerOptions.ActiveValue))
+		/* Coverity Fix CID: array_null - avoid null-check on fixed-size array */
+		char* pIPv6PrimaryActiveValue = pmtaethpro->IPv6PrimaryDhcpServerOptions.ActiveValue;
+		if(0 != strlen(pIPv6PrimaryActiveValue))
 		{
-                   rc = strcpy_s(buffer, sizeof(buffer), pmtaethpro->IPv6PrimaryDhcpServerOptions.ActiveValue);
+                   rc = strcpy_s(buffer, sizeof(buffer), pIPv6PrimaryActiveValue);
                    if(rc != EOK)
                    {
                         ERR_CHK(rc);

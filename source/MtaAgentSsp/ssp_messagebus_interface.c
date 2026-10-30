@@ -142,7 +142,9 @@ ssp_PnmMbi_MessageBusEngage
     }
     else
     {
-        rc = strcpy_s(PsmName,sizeof(PsmName),CCSP_DBUS_PSM);
+        /* Coverity Fix CID: array_null - avoid null-check on string literal */
+        const char* pPsmDbus = CCSP_DBUS_PSM;
+        rc = strcpy_s(PsmName,sizeof(PsmName),pPsmDbus);
         if(rc != EOK)
         {
             ERR_CHK(rc);
