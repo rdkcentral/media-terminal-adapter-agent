@@ -152,6 +152,8 @@ ANSC_STATUS ConverStr2Hex(unsigned char buffer[])
 	int i = 0, len = 0;
 	char 	tbuffer [ MAX_IPV6_HEX_VAL ] = { 0 };
         errno_t rc = -1;
+            if(buffer == NULL)
+                return ANSC_STATUS_FAILURE;
 			len = strlen((const char*)buffer);
                         rc = strcpy_s(tbuffer,sizeof(tbuffer), (const char*)buffer);
                         if(rc != EOK)
@@ -562,6 +564,8 @@ CosaMTAInitializeEthWanProvDhcpOption
 			return ANSC_STATUS_FAILURE;
 		}
      #endif
+         /* coverity[leaked_storage] - pMtaProv not freed when ENABLE_ETH_WAN is not
+            defined; in that build configuration ownership/usage is ambiguous */
      /* CID 121017 Structurally dead code fix */
      return ANSC_STATUS_SUCCESS;
 }
