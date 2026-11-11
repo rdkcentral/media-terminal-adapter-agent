@@ -489,16 +489,6 @@ pErr TR104_Process_Webconfig_Request(void *Data)
         counter = counter + 5;
     } while (counter < 600);
     
-    // Validate that MTA provisioning completed successfully
-    if( strcmp(MTA_status[operationalStatus], "MTA_COMPLETE") != 0)
-    {
-        CcspTraceError(("WebConfig cannot be applied: MTA operational status is %s, not MTA_COMPLETE\n", 
-                       MTA_status[operationalStatus]));
-        execRetVal->ErrorCode = TR104_HAL_FAILURE;
-        TR104_free_TR181_resources(total_params, aParamDetail);
-        return execRetVal;
-    }
-    
     // Changed the time from 150 seconds to 600 seconds 
     for(j=0;j<20;j++)
     {
