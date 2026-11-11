@@ -308,7 +308,7 @@ TEST_F(CcspMtaTestFixture, SetBlobVersionFailure) {
 }
 
 TEST_F(CcspMtaTestFixture, TR104CalculateTimeout) {
-    ASSERT_EQ(TR104_calculateTimeout(1), 360u);
+    ASSERT_EQ(TR104_calculateTimeout(1), 420u);
 }
 
 //Test cases for init_TR104_web_config
