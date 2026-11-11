@@ -1298,7 +1298,7 @@ int CosaDmlTR104DataSet(char* pString,int bootup)
         strncpy(execDataPf->subdoc_name,pWebConfig->subdoc_name, sizeof(execDataPf->subdoc_name)-1);
         execDataPf->user_data = (void*) pWebConfig;
         execDataPf->calcTimeout = TR104_calculateTimeout;
-065        execDataPf->executeBlobRequest = TR104_Process_Webconfig_Request;
+        execDataPf->executeBlobRequest = TR104_Process_Webconfig_Request;
         execDataPf->freeResources = TR104_Process_free_resources;
         isbootup=bootup;
         if(bootup == 1)
