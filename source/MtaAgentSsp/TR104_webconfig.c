@@ -13,8 +13,16 @@ char MTA_status[5][20] = {"MTA_INIT", "MTA_START", "MTA_COMPLETE", "MTA_ERROR", 
 #define TR104_SUBDOC_COUNT 1
 #define MTA_PROVISIONED "MTA_PROVISIONED"
 #define MTA_MAX_DETAIL_SIZE 512
+/* The framework multiplies this by 3, covering up to 15 minutes of TR-104 waits plus overhead. */
+#define TR104_APPLY_TIMEOUT_SECONDS 420
 
 int CosaDmlTR104DataSet(char* pString,int bootup);
+
+size_t TR104_calculateTimeout(size_t numOfEntries)
+{
+    (void)numOfEntries;
+    return TR104_APPLY_TIMEOUT_SECONDS;
+}
 
 FILE* fptr_dummy;
 FILE* fptr;
@@ -480,6 +488,16 @@ pErr TR104_Process_Webconfig_Request(void *Data)
         sleep(5);
         counter = counter + 5;
     } while (counter < 600);
+    
+    // Validate that MTA provisioning completed successfully
+    if( strcmp(MTA_status[operationalStatus], "MTA_COMPLETE") != 0)
+    {
+        CcspTraceError(("WebConfig cannot be applied: MTA operational status is %s, not MTA_COMPLETE\n", 
+                       MTA_status[operationalStatus]));
+        execRetVal->ErrorCode = TR104_HAL_FAILURE;
+        TR104_free_TR181_resources(total_params, aParamDetail);
+        return execRetVal;
+    }
     
     // Changed the time from 150 seconds to 600 seconds 
     for(j=0;j<20;j++)
@@ -1279,6 +1297,7 @@ int CosaDmlTR104DataSet(char* pString,int bootup)
         execDataPf->numOfEntries = 1;
         strncpy(execDataPf->subdoc_name,pWebConfig->subdoc_name, sizeof(execDataPf->subdoc_name)-1);
         execDataPf->user_data = (void*) pWebConfig;
+        execDataPf->calcTimeout = TR104_calculateTimeout;
         execDataPf->executeBlobRequest = TR104_Process_Webconfig_Request;
         execDataPf->freeResources = TR104_Process_free_resources;
         isbootup=bootup;

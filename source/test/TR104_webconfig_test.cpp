@@ -118,6 +118,7 @@ typedef struct
     int param_count(TR104_WebConfig_t* pTR104_WebConfig);  
     unsigned int getTr104DataBlobVersion(char *pSubDoc);
     int setTr104DataBlobVersion(char *pSubDoc, unsigned int version);
+    size_t TR104_calculateTimeout(size_t numOfEntries);
     int WebConfig_Process_set_Params(Set_Table_t* e,msgpack_object_map *map);
     int WebConfig_Process_client_Params(Client_Table_t* e,msgpack_object_map *map);
     int WebConfig_Process_operator_Params(Operator_Table_t* e,msgpack_object_map *map);
@@ -304,6 +305,10 @@ TEST_F(CcspMtaTestFixture, SetBlobVersionFailure) {
     int result = setTr104DataBlobVersion(const_cast<char*>(subDoc), version);
 
     ASSERT_EQ(result, -1);  
+}
+
+TEST_F(CcspMtaTestFixture, TR104CalculateTimeout) {
+    ASSERT_EQ(TR104_calculateTimeout(1), 360u);
 }
 
 //Test cases for init_TR104_web_config
