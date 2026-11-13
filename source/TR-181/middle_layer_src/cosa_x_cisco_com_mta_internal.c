@@ -560,6 +560,8 @@ CosaMTAInitializeEthWanProvDhcpOption
          /* coverity[leaked_storage] - pMtaProv not freed when ENABLE_ETH_WAN is not
             defined; in that build configuration ownership/usage is ambiguous */
      /* CID 121017 Structurally dead code fix */
+	 /* Coverity fix: CID: 39041 - Resource leak */
+	 free(pMtaProv);
      return ANSC_STATUS_SUCCESS;
 }
 
