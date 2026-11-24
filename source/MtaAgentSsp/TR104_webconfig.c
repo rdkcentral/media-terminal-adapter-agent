@@ -480,11 +480,12 @@ pErr TR104_Process_Webconfig_Request(void *Data)
 
         }
         // True when MTA operational status if complete or Rejected
-        else if( !strcmp(MTA_status[operationalStatus],"MTA_COMPLETE")  || !strcmp(MTA_status[operationalStatus],"MTA_REJECTED")) 
+        else if( !strcmp(MTA_status[operationalStatus],"MTA_COMPLETE")) 
 	{
-	    CcspTraceInfo(("%s operationalStatus = %s \n",__FUNCTION__,MTA_status[operationalStatus ]));
 	    break;
 	}
+
+	CcspTraceInfo(("%s operationalStatus = %s \n",__FUNCTION__,MTA_status[operationalStatus ]));
         sleep(5);
         counter = counter + 5;
     } while (counter < 600);
