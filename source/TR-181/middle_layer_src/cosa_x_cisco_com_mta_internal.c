@@ -69,6 +69,10 @@
 
 **************************************************************************/
 
+#if defined(MTA_TR104SUPPORT)
+/* Must precede mta_hal.h: LatticeFrameworkTypes.h typedefs CHAR, which mta_hal.h #defines */
+#include "TR104.h"
+#endif
 #include "plugin_main_apis.h"
 #include "safec_lib_common.h"
 #include "cosa_x_cisco_com_mta_apis.h"
@@ -543,6 +547,9 @@ CosaMTAInitializeEthWanProvDhcpOption
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
             }
+#if defined(MTA_TR104SUPPORT)
+            MtaTR104Init(TRUE);
+#endif
                         /*Coverity Fix  CID:120996 RESOURCE_LEAK */
                         free(pMtaProv);
 			return ANSC_STATUS_SUCCESS;
@@ -988,6 +995,9 @@ if(pMtaProv && pMyObject->pmtaprovinfo)
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
             }
+#if defined(MTA_TR104SUPPORT)
+            MtaTR104Init(TRUE);
+#endif
                         /* Coverity Fix CID:74083 RESOURCE_LEAK */
                         free(pMtaProv);
 			return ANSC_STATUS_SUCCESS;
@@ -1218,6 +1228,9 @@ if(pMtaProv)
             {
                 CcspTraceInfo(("%s: syscfg MTA_PROVISION successfully set to true\n", __FUNCTION__));
             }
+#if defined(MTA_TR104SUPPORT)
+            MtaTR104Init(TRUE);
+#endif
 			status = ANSC_STATUS_SUCCESS;
                    
 		}

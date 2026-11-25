@@ -22,32 +22,50 @@ AM_CXXFLAGS = -std=c++11
 
 ACLOCAL_AMFLAGS = -I m4
 
+# Shared includes and base defines
+COMMON_CPPFLAGS = -I$(PKG_CONFIG_SYSROOT_DIR)$(includedir)/gtest \
+                  -I${top_srcdir}/gtest/include \
+                  -I${top_srcdir}/source \
+                  -I${top_srcdir}/source/include \
+                  -I${top_srcdir}/source/TR-181 \
+                  -I${top_srcdir}/source/TR-181/include \
+                  -I${top_srcdir}/source/MtaAgentSsp \
+                  -I${top_srcdir}/source/TR-181/integration_src.shared \
+                  -I${top_srcdir}/source/TR-181/middle_layer_src \
+                  -I$(AM_CFLAGS) $(MTA_CFLAGS) \
+                  -D_CBR_PRODUCT_REQ_ \
+                  -D_XB6_PRODUCT_REQ_ \
+                  -DMTA_TR104SUPPORT \
+                  -DINTEL_PUMA7 \
+                  -DCONFIG_TI_BBU
+
+COMMON_SOURCES = ${top_srcdir}/source/MtaAgentSsp/TR104_webconfig.c \
+                 ${top_srcdir}/source/MtaAgentSsp/TR104.c \
+                 ${top_srcdir}/source/TR-181/integration_src.shared/cosa_x_cisco_com_mta_apis.c \
+                 ${top_srcdir}/source/TR-181/middle_layer_src/cosa_x_cisco_com_mta_internal.c \
+                 ${top_srcdir}/source/TR-181/middle_layer_src/plugin_main.c \
+                 ${top_srcdir}/source/TR-181/middle_layer_src/plugin_main_apis.c \
+                 ${top_srcdir}/source/TR-181/middle_layer_src/cosa_x_cisco_com_mta_dml.c
+
+COMMON_LDLIBS = $(HOME)/usr/local/lib/libmock_mta_hal.la \
+                $(HOME)/usr/local/lib/libmock_safec_lib.la \
+                $(HOME)/usr/local/lib/libmock_ccsp_common.la \
+                $(HOME)/usr/local/lib/libmock_syscfg.la \
+                $(HOME)/usr/local/lib/libmock_sysevent.la \
+                $(HOME)/usr/local/lib/libmock_msgpack.la \
+                $(HOME)/usr/local/lib/libmock_rbus.la \
+                $(HOME)/usr/local/lib/libmock_secure_wrapper.la \
+                $(HOME)/usr/local/lib/libmock_webconfigframework.la
+
+COMMON_LDFLAGS = -lgtest -lgmock -lgcov -lcjson -lpthread
+
+# Primary test binary (without ETHWAN - avoids thread race conditions)
 bin_PROGRAMS = CcspMtaAgentSsp_gtest.bin
 
-CcspMtaAgentSsp_gtest_bin_CPPFLAGS = -I$(PKG_CONFIG_SYSROOT_DIR)$(includedir)/gtest \
-                                     -I${top_srcdir}/gtest/include \
-                                     -I${top_srcdir}/source \
-                                     -I${top_srcdir}/source/include \
-                                     -I${top_srcdir}/source/TR-181 \
-                                     -I${top_srcdir}/source/TR-181/include \
-                                     -I${top_srcdir}/source/MtaAgentSsp \
-                                     -I${top_srcdir}/source/TR-181/integration_src.shared \
-                                     -I${top_srcdir}/source/TR-181/middle_layer_src \
-                                     -I$(AM_CFLAGS) $(MTA_CFLAGS) \                                     
-                                     -D_CBR_PRODUCT_REQ_ \
-                                     -D_XB6_PRODUCT_REQ_ \
-                                     -DMTA_TR104SUPPORT \
-                                     -DINTEL_PUMA7 \
-                                     -DCONFIG_TI_BBU
+CcspMtaAgentSsp_gtest_bin_CPPFLAGS = $(COMMON_CPPFLAGS) -DENABLE_ETH_WAN
 
 CcspMtaAgentSsp_gtest_bin_SOURCES = gtest_main.cpp \
-                                    ${top_srcdir}/source/MtaAgentSsp/TR104_webconfig.c \
-                                    ${top_srcdir}/source/MtaAgentSsp/TR104.c \
-                                    ${top_srcdir}/source/TR-181/integration_src.shared/cosa_x_cisco_com_mta_apis.c \
-                                    ${top_srcdir}/source/TR-181/middle_layer_src/cosa_x_cisco_com_mta_internal.c \
-                                    ${top_srcdir}/source/TR-181/middle_layer_src/plugin_main.c \
-                                    ${top_srcdir}/source/TR-181/middle_layer_src/plugin_main_apis.c \
-                                    ${top_srcdir}/source/TR-181/middle_layer_src/cosa_x_cisco_com_mta_dml.c \
+                                    $(COMMON_SOURCES) \
                                     cosa_x_cisco_com_mta_apis_test.cpp \
                                     cosa_x_cisco_com_mta_dml_test.cpp \
                                     TR104_webconfig_test.cpp \
@@ -56,20 +74,33 @@ CcspMtaAgentSsp_gtest_bin_SOURCES = gtest_main.cpp \
                                     cosa_x_cisco_com_mta_internal_test.cpp \
                                     mta_mock.cpp
 
-CcspMtaAgentSsp_gtest_bin_LDFLAGS = -lgtest -lgmock -lgcov -lcjson -lpthread
+CcspMtaAgentSsp_gtest_bin_LDFLAGS = $(COMMON_LDFLAGS) \
+                                     -Wl,--wrap=v_secure_system
 
-CcspMtaAgentSsp_gtest_bin_LDADD =$(HOME)/usr/local/lib/libmock_mta_hal.la \
-                                $(HOME)/usr/local/lib/libmock_safec_lib.la \
-                                $(HOME)/usr/local/lib/libmock_ccsp_common.la \
-                                $(HOME)/usr/local/lib/libmock_syscfg.la \
-                                $(HOME)/usr/local/lib/libmock_sysevent.la \
-                                $(HOME)/usr/local/lib/libmock_msgpack.la \
-                                $(HOME)/usr/local/lib/libmock_rbus.la \
-                                $(HOME)/usr/local/lib/libmock_webconfigframework.la 
+CcspMtaAgentSsp_gtest_bin_LDADD = $(COMMON_LDLIBS)
 
+# Isolated ETHWAN test binary (TR104 initialization tests only, with thread control)
+bin_PROGRAMS += CcspMtaAgentSsp_ethwan_gtest.bin
+
+CcspMtaAgentSsp_ethwan_gtest_bin_CPPFLAGS = $(COMMON_CPPFLAGS) -DENABLE_ETH_WAN
+
+CcspMtaAgentSsp_ethwan_gtest_bin_SOURCES = gtest_main.cpp \
+                                           $(COMMON_SOURCES) \
+                                           TR104_init_test.cpp \
+                                           mta_mock.cpp
+
+CcspMtaAgentSsp_ethwan_gtest_bin_LDFLAGS = $(COMMON_LDFLAGS) \
+                                           -Wl,--wrap=pthread_create \
+                                           -Wl,--wrap=sleep \
+                                           -Wl,--wrap=fopen \
+                                           -Wl,--wrap=mta_hal_start_provisioning
+
+CcspMtaAgentSsp_ethwan_gtest_bin_LDADD = $(COMMON_LDLIBS)
 
 # Adding Code Coverage Flags
 AM_CFLAGS += -fprofile-arcs -ftest-coverage
 AM_CXXFLAGS += -fprofile-arcs -ftest-coverage
 CcspMtaAgentSsp_gtest_bin_LDFLAGS += --coverage
+CcspMtaAgentSsp_ethwan_gtest_bin_LDFLAGS += --coverage
 CcspMtaAgentSsp_gtest_bin_CFLAGS = $(AM_CFLAGS) $(MTA_CFLAGS)
+CcspMtaAgentSsp_ethwan_gtest_bin_CFLAGS = $(AM_CFLAGS) $(MTA_CFLAGS)

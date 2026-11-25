@@ -70,6 +70,11 @@ graph LR
 
 - **Voice Line Management**: Manages PacketCable voice line provisioning, configuration, and monitoring including line status, registration state, call statistics, and quality metrics for FXS (Foreign Exchange Station) ports and DECT cordless handsets
 - **TR-104 VoIP Service Support**: Implements TR-104 (Voice over IP) data model for comprehensive VoIP service configuration including SIP profiles, codecs, network parameters, call features, and service provider settings through RBus interface
+
+  TR-104 initialization runs in a shared, duplicate-protected detached thread when `MTA_TR104SUPPORT` is enabled. DOCSIS starts the worker during agent startup and retains 24 registration attempts with 10-second waits after failures. Ethernet WAN starts it after successful HAL provisioning and retains eight attempts with a four-second delay before each attempt. On successful registration, the worker restarts TR-069 PA and reapplies the saved voice configuration.
+
+  The initializer is implemented in `TR104.c`, which is compiled into both the agent executable and the TR-181 library; neither target relies on the other to resolve the initialization entry point.
+
 - **DHCP/DHCPv6 Information Management**: Monitors and reports MTA-specific DHCP and DHCPv6 lease information including provisioning server addresses, TFTP boot file locations, time servers, and FQDN assignments critical for PacketCable provisioning
 - **DECT Cordless Phone Support**: Provides registration, deregistration, and management capabilities for DECT (Digital Enhanced Cordless Telecommunications) handsets including PIN management and handset discovery
 - **Service Flow Monitoring**: Tracks DOCSIS service flow statistics for voice traffic including upstream/downstream bandwidth allocation, QoS parameters, and real-time performance metrics

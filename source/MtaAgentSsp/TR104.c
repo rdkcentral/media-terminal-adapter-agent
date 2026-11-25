@@ -28,6 +28,140 @@
 #include "cosa_x_cisco_com_mta_internal.h"
 #include "ccsp_base_api.h"
 #include "messagebus_interface_helper.h"
+#include "secure_wrapper.h"
+#include <pthread.h>
+#include <unistd.h>
+
+int CosaDmlTR104DataSet(char *pString,int bootup);
+
+static pthread_mutex_t mtaTR104InitMutex = PTHREAD_MUTEX_INITIALIZER;
+static int mtaTR104InitInProgress;
+static int mtaTR104InitComplete;
+
+static void *MtaTR104InitWorker(void *arg)
+{
+    char value[8] = {'\0'};
+    BOOL isEthWan = *(const BOOL *)arg;
+    int maxRetries = isEthWan ? 8 : 24;
+    int retry, err = -1;
+
+    for (retry = 0; retry < 5; retry++)
+    {
+        if (syscfg_get(NULL, "TR104enable", value, sizeof(value)) == 0)
+            break;
+        CcspTraceError(("syscfg_get is failed\n"));
+    }
+    if (retry == 5 || strcmp(value, "true") != 0)
+    {
+        CcspTraceInfo(("RFC for TR104 is false \n"));
+        goto thread_exit;
+    }
+    CcspTraceInfo(("RFC for TR104 is true\n"));
+
+    for (retry = 0; retry < maxRetries; retry++)
+    {
+        if (isEthWan)
+            sleep(4);
+        err = TR104_open();
+        CcspTraceInfo(("TR104_open returned %d during %d iteration\n", err, retry));
+        if (err == 0)
+            break;
+        if (!isEthWan)
+            sleep(10);
+    }
+    if (err != 0)
+    {
+        CcspTraceWarning(("TR104_open is failing for %d times so breaking the loop\n", retry));
+        goto thread_exit;
+    }
+    pthread_mutex_lock(&mtaTR104InitMutex);
+    mtaTR104InitComplete = 1;
+    pthread_mutex_unlock(&mtaTR104InitMutex);
+
+    CcspTraceInfo(("TR104_open returned %d and restarting CcspTr069PaSsp\n", err));
+    v_secure_system("systemctl restart CcspTr069PaSsp &");
+    FILE* fptr = fopen("/nvram/.vsb64.txt","rb");
+    if (fptr)
+    {
+        CcspTraceDebug(("file present and about to read\n"));
+        char* buffer = 0;
+        long length;
+        fseek(fptr, 0, SEEK_END);
+        length = ftell(fptr);
+        fseek(fptr, 0, SEEK_SET);
+        buffer = (length >= 0) ? (char*)malloc(length+1) : NULL;
+        if (buffer)
+        {
+            /* Coverity Fix : CHECKED_RETURN */
+            size_t bytesRead = fread(buffer, 1, length, fptr);
+            if (bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                CcspTraceInfo(("buffer=%s\n", buffer));
+                CosaDmlTR104DataSet(buffer, 1);
+            } else {
+                CcspTraceWarning(("fread failed or returned 0 bytes\n"));
+            }
+            free(buffer);
+        }
+        fclose(fptr);
+    }
+    else
+    {
+        CcspTraceInfo(("file not present\n"));
+    }
+
+thread_exit:
+    pthread_mutex_lock(&mtaTR104InitMutex);
+    mtaTR104InitInProgress = 0;
+    pthread_mutex_unlock(&mtaTR104InitMutex);
+    return NULL;
+}
+
+void MtaTR104Init(BOOL isEthWan)
+{
+    static BOOL ethWanMode = TRUE;
+    static BOOL docsisMode = FALSE;
+    pthread_attr_t attr;
+    pthread_t thread;
+    int rc;
+
+    pthread_mutex_lock(&mtaTR104InitMutex);
+    if (mtaTR104InitInProgress || mtaTR104InitComplete)
+    {
+        pthread_mutex_unlock(&mtaTR104InitMutex);
+        return;
+    }
+
+    rc = pthread_attr_init(&attr);
+    if (rc != 0)
+    {
+        pthread_mutex_unlock(&mtaTR104InitMutex);
+        CcspTraceError(("Failed to initialize TR104 thread attributes: %d\n", rc));
+        return;
+    }
+
+    rc = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (rc != 0)
+    {
+        pthread_attr_destroy(&attr);
+        pthread_mutex_unlock(&mtaTR104InitMutex);
+        CcspTraceError(("Failed to set TR104 thread detached state: %d\n", rc));
+        return;
+    }
+
+    mtaTR104InitInProgress = 1;
+    rc = pthread_create(&thread, &attr, MtaTR104InitWorker, isEthWan ? &ethWanMode : &docsisMode);
+    pthread_attr_destroy(&attr);
+    if (rc != 0)
+    {
+        mtaTR104InitInProgress = 0;
+        pthread_mutex_unlock(&mtaTR104InitMutex);
+        CcspTraceError(("Failed to start TR104 initialization thread: %d\n", rc));
+        return;
+    }
+    pthread_mutex_unlock(&mtaTR104InitMutex);
+}
+
 char MTA_provision_status[2][20] = {"MTA_PROVISIONED", "MTA_NON_PROVISIONED"};
 #define MTA_PROVISIONED "MTA_PROVISIONED"
 #define PARAM_BUF_SIZE 128+8192  //DMCLI object name + type + string parameter (8192 bytes from TR104 spec) 
@@ -479,4 +613,16 @@ int TR104_open()
 
     return RBUS_ERROR_OUT_OF_RESOURCES;
 }
+
+/* Test-only function to reset initializer state for test fixtures */
+#ifdef ENABLE_ETH_WAN
+void MtaTR104InitResetForTest(void)
+{
+    pthread_mutex_lock(&mtaTR104InitMutex);
+    mtaTR104InitInProgress = 0;
+    mtaTR104InitComplete = 0;
+    pthread_mutex_unlock(&mtaTR104InitMutex);
+}
+#endif
+
 #endif
